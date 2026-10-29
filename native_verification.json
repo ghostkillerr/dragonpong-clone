@@ -1,0 +1,9 @@
+{
+  "motion_cases": 5000,
+  "strike_cases": 2020,
+  "additional_cases": 88,
+  "mismatches": 0,
+  "binary_sha256": "937ac8bb55b8265e9359e3db479d9334e5314dab981507fbc06313576fac1341",
+  "scope": "Original x86 motion, walls, shield reflection/expiry, hit window/arithmetic, powerup branches, serve, movement bounds, goal scoring",
+  "excluded": "Goal sequencing, native timing, UI, audio rendering, network and RNG sequence"
+}
