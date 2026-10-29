@@ -5,7 +5,7 @@ build/
 dist/
 reference_sounds/
 *.spec
-release_local_v2/
+release_local_*/
 .venv/
 venv/
 .env

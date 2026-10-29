@@ -1,0 +1,42 @@
+{
+  "baseline": false,
+  "comparisons": [
+    {
+      "seconds": 60,
+      "seed": 3,
+      "original": {
+        "hits": 545,
+        "walls": 25
+      },
+      "clone": {
+        "hits": 545,
+        "walls": 25
+      }
+    },
+    {
+      "seconds": 60,
+      "seed": 17,
+      "original": {
+        "hits": 569,
+        "walls": 18
+      },
+      "clone": {
+        "hits": 569,
+        "walls": 18
+      }
+    },
+    {
+      "seconds": 60,
+      "seed": 41,
+      "original": {
+        "hits": 469,
+        "walls": 4
+      },
+      "clone": {
+        "hits": 469,
+        "walls": 4
+      }
+    }
+  ],
+  "flight_samples": 25687
+}

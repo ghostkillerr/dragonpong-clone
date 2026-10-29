@@ -113,6 +113,12 @@ class Match:
         self._lateral_step = f32(self._lateral_step + self.rng.randrange(6) / 100)
         self.vz = (1 if player == 0 else -1) * speed / TICK
         self.vx = (1 if offset > 0 else -1 if offset < 0 else 0) * self._lateral_step / TICK
+        # The native peer's BE receive branch starts a fresh incoming flight
+        # at the hitter's paddle, at full court depth (0x403cfc..0x403d51).
+        # Keeping the fractional contact position shortened rallies and kept
+        # reintroducing lateral direction even after apparently centered hits.
+        self.ball_x = self.paddles[player]
+        self.ball_z = player * COURT_LENGTH
         self.emit('paddle', player)
         self._clear_silent()
         # Humans and bots use this same path and these same odds.
@@ -167,7 +173,13 @@ class Match:
             return
         # Float32 arithmetic in original lateral coordinates (1..19).
         self.ball_x = f32(f32(self.ball_x + 10) + f32(self.vx * TICK)) - 10
-        self.ball_z = f32(self.ball_z + f32(self.vz * TICK))
+        # Each receiving native client subtracts from its own float32 depth.
+        # Adding in world coordinates for player 1 rounds differently and can
+        # shift the hit by one tick, changing the following shot's lateral sign.
+        if self.vz < 0:
+            self.ball_z = f32(self.ball_z - f32(-self.vz * TICK))
+        else:
+            self.ball_z = COURT_LENGTH - f32((COURT_LENGTH - self.ball_z) - f32(self.vz * TICK))
         if (self.ball_x < -HALF_WIDTH and self.vx < 0) or (self.ball_x > HALF_WIDTH and self.vx > 0):
             self.vx = -self.vx
             self.emit('wall')  # Silence suppresses rolling, not wall collisions.

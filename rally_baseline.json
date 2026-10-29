@@ -1,0 +1,41 @@
+{
+  "baseline": true,
+  "comparisons": [
+    {
+      "seconds": 60,
+      "seed": 3,
+      "original": {
+        "hits": 545,
+        "walls": 25
+      },
+      "clone": {
+        "hits": 264,
+        "walls": 218
+      }
+    },
+    {
+      "seconds": 60,
+      "seed": 17,
+      "original": {
+        "hits": 569,
+        "walls": 18
+      },
+      "clone": {
+        "hits": 982,
+        "walls": 926
+      }
+    },
+    {
+      "seconds": 60,
+      "seed": 41,
+      "original": {
+        "hits": 469,
+        "walls": 4
+      },
+      "clone": {
+        "hits": 924,
+        "walls": 876
+      }
+    }
+  ]
+}

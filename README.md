@@ -43,6 +43,10 @@ baş ölçümüdür; kişiden kişiye ön/arka algısı değişebilir.
 
 ## Durum
 
+v2.1'de fazla yan duvar sekmesine neden olan vuruş sonrası konum ve derinlik
+hesabı düzeltildi. [Fizik karşılaştırması](PHYSICS_COMPARISON.md) özgün EXE ile
+ölçülen farkı, düzeltmeyi ve yeni uzun ralli testlerini açıklar.
+
 Motorun karşılaştırılan 7.108 durumunda özgün x86 koduyla aynı sonuç alındı.
 Bütün oyunun birebirliği henüz kanıtlanmadı: kapsam ve açık farklar [PARITY.md](PARITY.md),
 bağımlı modül kontrolleri [REGRESSION.md](REGRESSION.md) içinde.

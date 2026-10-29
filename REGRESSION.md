@@ -1,5 +1,24 @@
 # Modül regresyon kaydı
 
+## 29 Ekim 2026 — yan sekme düzeltmesi
+
+Denetim tabanı: `cc7764a`. engine → server/audio/run_offline bağımlılığı devam ediyor.
+Değişen motor davranışı: BE vuruş aktarımının başlangıç konumu ve alıcı derinliği.
+Yeni test noktaları: temas konumunun rakete sıfırlanması, art arda ortalanmış
+vuruşlar, iki alıcı yönünde float32 eşitliği; `verify_rallies.py` gerçek native
+alıcı dalını ve uzun rallileri kapsar. Önceki test kapsamındaki açık bu raporda korunur.
+
+Kabul: `python -m unittest discover -s tests -v` (39 test, çıkış 0),
+`python verify_native.py` (7.108 karşılaştırma, çıkış 0), `python verify_rallies.py`
+(25.687 uçuş adımı ve üç uzun ralli, çıkış 0). Kullanıcının yerel referansı aynı
+SHA-256 ile doğrulandı. Yerel emülasyon, Tk ve geçici TCP testleri kullanıldı;
+ayrıntılar PHYSICS_COMPARISON.md'de. Tarihsel aşağıdaki kayıtlar v2'ye aittir.
+
+Dağıtım: v2.1 EXE derlendi; paketli gerçek ses/Tk kontrolünde 143 varlık, 30 skor
+ve çalışan top doğrulandı. VPS hizmeti güncellendi; `verify_public.py` iki oda,
+dört oyuncu ve bir izleyiciyle çıkış 0 verdi. Dağıtım öncesi yedek:
+`/opt/dragonpong/clone-backup-1793284594377977482`.
+
 Başlangıç: DragonPongClone_source_v1.zip yerel arşivi; Git deposu yok.
 v1'de 9 test vardı; bunlar özgün davranış eşdeğerliğini kanıtlamıyordu.
 Değişiklikler: engine, audio, soundbank (yeni), client, server, run_offline,

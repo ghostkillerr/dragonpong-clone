@@ -1,4 +1,9 @@
-# Doğrulama sınırı — 28 Ekim 2026
+# Doğrulama sınırı — 29 Ekim 2026
+
+v2.1: yan duvara fazla sekmeye neden olan vuruş aktarımı ve iki yönün float32
+derinlik farkı düzeltildi. [Karşılaştırma raporu](PHYSICS_COMPARISON.md):
+39 test, 7.108 fonksiyon karşılaştırması ve 25.687 uçuş adımı. Üç uzun rallide
+vuruş ve sekme sayıları özgün kodla eşleşti.
 
 Bu sürümün tamamına **birebir klon** etiketi verilmez. Önceki v1 kaynak motoru
 özgün davranış yerine basitleştirilmiş kurallar içeriyordu. v2 bu farkların
@@ -18,9 +23,10 @@ fizik aritmetiği ve dalları özgün talimatlardır. Sonuç: `native_verificati
 | Vuruş penceresi, yön, hız artışı, güç kazanma dalları | 0x404bfa ve 0x402281 | 2.020 durum, sınır değerler dahil |
 | Servis, adım/sınırlar, kalkan süresi, gol sayımı | 0x404bfa, 0x404988, 0x404a10, 0x402f8d, 0x402541 | 88 ek durum |
 
-Toplam 7.108 karşılaştırma, sıfır fark. Bu tablo oyuncu 1'in yerel koordinatlarındaki
-özgün fonksiyonları kapsar. İkinci taraf sunucuda aynalanır; bu aktarımın bütün eski
-ağ paketleriyle eşdeğerliği iddia edilmez.
+Toplam 7.108 karşılaştırma, sıfır fark. Hareket kontrolleri iki tarafta da alıcının
+yerel koordinatlarını kullanır. Bunlara eklenen BE alıcı bloğu ve uzun ralli
+kontrolleri PHYSICS_COMPARISON.md'dedir. Bütün eski ağ paketlerinin veya gerçek
+zamanlamanın eşdeğerliği iddia edilmez.
 
 Doğrulanan kurallar: lateral konum 1..19, bir tuşta bir adım; vuruş için top yaklaşırken
 derinlik <6 ve mesafe <3; servis adımları 0,05 ve 0,01; her vuruşta bağımsız 0..5 /100

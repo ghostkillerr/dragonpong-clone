@@ -13,6 +13,36 @@ class FixedRolls:
 
 
 class RulesRegression(unittest.TestCase):
+    def test_hit_restarts_from_paddle_like_native_received_shot(self):
+        for player in (0, 1):
+            match = self.incoming(player)
+            match.ball_x = 2.5
+            match.paddles[player] = 1
+            self.assertTrue(match.strike(player))
+            self.assertEqual(match.ball_x, 1)
+            self.assertEqual(match.ball_z, player * 20)
+            self.assertGreater(match.vx, 0)  # Direction still uses pre-hit offset.
+
+    def test_centered_return_stays_straight_across_repeated_hits(self):
+        match = self.incoming()
+        match.ball_x = match.paddles[0] = match.paddles[1] = 2
+        for player in (0, 1, 0, 1, 0):
+            match.ball_z = 3 if player == 0 else 17
+            match.vz = -abs(match.vz) if player == 0 else abs(match.vz)
+            self.assertTrue(match.strike(player))
+            self.assertEqual(match.vx, 0)
+            for _ in range(8):
+                self.assertNotIn('wall', [e.kind for e in match.step(TICK)])
+                self.assertEqual(match.ball_x, 2)
+
+    def test_mirrored_receivers_keep_identical_float32_depth(self):
+        a, b = self.incoming(), self.incoming(1)
+        a.ball_z, b.ball_z = 20, 0
+        a.vz, b.vz = -f32(.07) / TICK, f32(.07) / TICK
+        for _ in range(200):
+            a.step(TICK); b.step(TICK)
+            self.assertEqual(a.ball_z, 20 - b.ball_z)
+
     def incoming(self, player=0, rules=None):
         match = Match(rules or Rules(shield=False, silent_ball=False), seed=1)
         match.ball_z = 3 if player == 0 else 17

@@ -22,8 +22,8 @@ from dragonpong.engine import Match, Rules, TICK, f32
 
 
 class Native:
-    def __init__(self):
-        path = BASE.parent / 'analysis/original/DragonPong.exe'
+    def __init__(self, path=None):
+        path = Path(path) if path is not None else BASE.parent / 'analysis/original/DragonPong.exe'
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         assert digest == '937ac8bb55b8265e9359e3db479d9334e5314dab981507fbc06313576fac1341'
         pe = pefile.PE(str(path))
@@ -118,10 +118,12 @@ def main():
         shield = rng.random() < .1
         if shield:
             inbound, z = True, f32(.5)
-        native.setup(x, z, sx, sz, lateral, inbound, shield, silent=True)
+        # A shared world state must match the RECEIVING native client on both
+        # sides, not one client's outgoing visual extrapolation.
+        native.setup(x, z, sx, sz, lateral, True, shield, silent=True)
         native.run(0x402541)
         match = Match()
-        match.ball_x, match.ball_z = x - 10, z
+        match.ball_x, match.ball_z = x - 10, z if inbound else 20 - z
         match.vx = (-1 if lateral == 1 else 1 if lateral == 2 else 0) * sx / TICK
         match.vz = (-1 if inbound else 1) * sz / TICK
         match.silent_until = math.inf
@@ -129,8 +131,9 @@ def main():
         match.step(TICK)
         actual = (match.ball_x + 10, match.ball_z, 1 if match.vz < 0 else 2,
                   1 if match.vx < 0 else 2 if match.vx > 0 else 3)
-        expected = (native.get(0x412e3c, 'f'), native.get(0x412e40, 'f'),
-                    native.get(0x412e50), native.get(0x412e4c))
+        expected = (native.get(0x412e3c, 'f'),
+                    native.get(0x412e40, 'f') if inbound else 20 - native.get(0x412e40, 'f'),
+                    (1 if (native.get(0x412e50) == 1) == inbound else 2), native.get(0x412e4c))
         assert actual == expected, ('motion', actual, expected)
         motion_count += 1
     # Include exact hit boundaries and centered strokes, plus randomized inputs.
