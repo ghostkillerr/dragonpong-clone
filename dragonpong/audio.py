@@ -165,6 +165,7 @@ class AudioOutput:
         self._music = None
         self._music_sample = 0
         self._music_path = None
+        self.music_gain = .4
 
     def start(self) -> None:
         import sounddevice as sd
@@ -252,7 +253,7 @@ class AudioOutput:
         with self._lock:
             if self._music is not None:
                 mono = self._music[(np.arange(frames) + self._music_sample) % len(self._music)]
-                outdata[:] += mono[:, None] * .4  # User requested a 60% reduction.
+                outdata[:] += mono[:, None] * self.music_gain
                 self._music_sample += frames
             if self._shield_loop is not None:
                 mono = self._shield_loop[(np.arange(frames) + self._shield_sample) % len(self._shield_loop)]

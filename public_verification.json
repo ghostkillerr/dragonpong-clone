@@ -1,0 +1,13 @@
+{
+  "host": "ekransizoyuncular.gen.tr",
+  "port": 8870,
+  "rooms": 2,
+  "players": 4,
+  "spectators": 1,
+  "settings_score": 30,
+  "mirrored_controls": true,
+  "serve": true,
+  "isolated_rooms": true,
+  "spectator_perspective": true,
+  "passed": true
+}

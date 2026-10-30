@@ -1,5 +1,16 @@
 # Modül regresyon kaydı
 
+## V7 özellik denetimi — v2.2, 29 Ekim 2026
+
+Değişen modüller: run_offline (odak, tuşlar, kalıcı profil, fare), controls (yeni
+SDL giriş modülü), audio (müzik katsayısı), server (izleyiciye ilk durum).
+Bağımlılık: controls/audio/client/engine → run_offline; server → çevrimiçi UI.
+Karşılaştırma kapsamı V7_COMPARISON.md'de. Kabul komutu
+`python -m unittest discover -s tests -v`: 48 test, çıkış 0. Yeni regresyonlar
+anında kayıt, geçersiz profil, oda Enter/yeni oda, iki yönde izleyici döngüsü,
+izleyicinin ayar ekranı, fare, kontrolcü kenar/tekrar/odak ve bitmiş maç durumudur.
+Fizik dosyası bu denetimde değiştirilmedi. GitHub işlemi yapılmaz.
+
 ## 29 Ekim 2026 — yan sekme düzeltmesi
 
 Denetim tabanı: `cc7764a`. engine → server/audio/run_offline bağımlılığı devam ediyor.

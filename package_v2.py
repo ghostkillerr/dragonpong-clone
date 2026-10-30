@@ -11,19 +11,22 @@ BASE = Path(__file__).resolve().parent
 OUT = BASE.parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--version', default='v2')
-VERSION = parser.parse_args().version
+parser.add_argument('--exe', type=Path, default=BASE / 'dist/DragonPongClone.exe')
+args = parser.parse_args()
+VERSION = args.version
 if not re.fullmatch(r'v[0-9]+(?:_[0-9]+)*', VERSION):
     raise ValueError('Invalid package version')
 LOCAL = BASE / f'release_local_{VERSION}'
 LOCAL.mkdir(exist_ok=True)
-for name in ('start_clone.bat', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'PARITY.md', 'PHYSICS_COMPARISON.md'):
+for name in ('start_clone.bat', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'PARITY.md', 'PHYSICS_COMPARISON.md', 'V7_COMPARISON.md'):
     shutil.copy2(BASE / name, LOCAL / name)
-shutil.copy2(BASE / 'dist/DragonPongClone.exe', LOCAL / 'DragonPongClone.exe')
+shutil.copy2(args.exe, LOCAL / 'DragonPongClone.exe')
 shutil.copytree(BASE / 'reference_sounds', LOCAL / 'reference_sounds', dirs_exist_ok=True)
 source = [p for folder in ('dragonpong', 'tests') for p in (BASE / folder).glob('*.py')]
 source += [BASE / name for name in (
     'run_offline.py', 'prepare_reference_sounds.py', 'verify_native.py', 'package_v2.py', 'verify_public.py',
     'verify_rallies.py', 'PHYSICS_COMPARISON.md', 'rally_baseline.json', 'rally_verification.json',
+    'V7_COMPARISON.md', 'AGENTS.md',
     'requirements.txt', 'requirements-dev.txt', 'start_clone.bat', 'start_server.bat',
     'build_exe.bat', 'README.md', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
     'PARITY.md', 'REGRESSION.md', 'native_verification.json', '.gitignore',

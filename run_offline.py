@@ -11,8 +11,11 @@ from pathlib import Path
 from tkinter import ttk
 
 from dragonpong.audio import AudioOutput
-from dragonpong.client import Connection
+from dragonpong.client import Connection, predict_ball
 from dragonpong.engine import Bot, COURT_LENGTH, Event, HALF_WIDTH, Match, Rules
+from dragonpong.controls import ControllerInput
+
+CHARACTERS = ['Lord owny', 'Uncle Sam', 'Evil Sammy', 'David The Eighth', 'Karakter 5']
 
 PROFILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DragonPongClone" / "profile.json"
 if os.environ.get('DRAGONPONG_PROFILE'):
@@ -25,7 +28,15 @@ def load_profile() -> dict:
     try:
         data = json.loads(PROFILE.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            defaults.update({key: value for key, value in data.items() if key in defaults})
+            if isinstance(data.get('name'), str) and 1 <= len(data['name'].strip()) <= 24:
+                defaults['name'] = data['name'].strip()
+            if type(data.get('score')) is int and 1 <= data['score'] <= 2147483647:
+                defaults['score'] = data['score']
+            for key in ('shield', 'silent_ball'):
+                if type(data.get(key)) is bool:
+                    defaults[key] = data[key]
+            if data.get('difficulty') in Bot.LEVELS:
+                defaults['difficulty'] = data['difficulty']
     except (OSError, ValueError):
         pass
     return defaults
@@ -39,6 +50,7 @@ class Game:
         self.root.minsize(500, 600)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.audio = AudioOutput()
+        self.controller = ControllerInput()
         self.audio_error = ""
         try:
             self.audio.start()
@@ -66,6 +78,79 @@ class Game:
     def clear(self) -> None:
         for child in self.container.winfo_children():
             child.destroy()
+        self.root.after_idle(self.bind_navigation)
+
+    def save_profile(self) -> None:
+        PROFILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = PROFILE.with_suffix('.tmp')
+        temporary.write_text(json.dumps(self.profile, ensure_ascii=False), encoding='utf-8')
+        temporary.replace(PROFILE)
+
+    def bind_navigation(self) -> None:
+        widgets = [w for w in self.container.winfo_children()
+                   if w.winfo_class() in ('TButton', 'TCheckbutton', 'TEntry', 'TCombobox', 'Listbox')]
+        for index, widget in enumerate(widgets):
+            widget.bind('<FocusIn>', lambda event: self.describe_focus(event.widget), add='+')
+            if widget.winfo_class() in ('TButton', 'TCheckbutton', 'TEntry'):
+                for key, delta in (('<Up>', -1), ('<Down>', 1)):
+                    def move(_event, i=index, d=delta):
+                        widgets[(i + d) % len(widgets)].focus_set()
+                        return 'break'
+                    widget.bind(key, move)
+            if widget.winfo_class() in ('TButton', 'TCheckbutton'):
+                widget.bind('<Return>', lambda event: (event.widget.invoke(), 'break')[1])
+
+    def describe_focus(self, widget) -> None:
+        if widget.winfo_class() == 'Listbox':
+            selected = widget.curselection()
+            text = widget.get(selected[0]) if selected else 'Odalar'
+        elif widget.winfo_class() in ('TEntry', 'TCombobox'):
+            label = 'Hedef skor' if widget is getattr(self, 'score', None) else 'Seçim'
+            text = f'{label}: {widget.get()}'
+        else:
+            variable = widget.cget('textvariable') if 'textvariable' in widget.keys() else ''
+            text = self.root.getvar(variable) if variable else widget.cget('text')
+        self.title_message(str(text))
+
+    def title_message(self, text: str) -> None:
+        self.root.title(f'DragonPong Kaynak Klon - {text}')
+        if os.name == 'nt':
+            import ctypes
+            hwnd = self.root.winfo_id()
+            user32 = ctypes.windll.user32
+            parent = user32.GetParent(hwnd)
+            user32.NotifyWinEvent(0x800C, parent or hwnd, 0, 0)
+
+    def install_mouse_controls(self) -> None:
+        self.mouse_wheel_steps = 0
+        self.canvas.bind('<Button-1>', lambda _event: self.key_down(type('Key', (), {'keysym': 'Up'})()))
+        self.canvas.bind('<MouseWheel>', self.mouse_wheel)
+
+    def mouse_wheel(self, event) -> None:
+        self.mouse_wheel_steps += int(event.delta / 120)
+        if abs(self.mouse_wheel_steps) >= 3:
+            key = 'Right' if self.mouse_wheel_steps > 0 else 'Left'
+            self.mouse_wheel_steps = 0
+            self.key_down(type('Key', (), {'keysym': key})())
+
+    def remember_name(self, _event=None) -> None:
+        if not self.name.winfo_exists():
+            return
+        value = self.name.get().strip()
+        if 1 <= len(value) <= 24:
+            self.profile['name'] = value
+            self.save_profile()
+
+    def remember_settings(self, _event=None) -> None:
+        try:
+            rules = Rules(int(self.score.get()), self.shield.get(), self.silent.get())
+        except (ValueError, TypeError, tk.TclError):
+            return
+        self.profile.update(score=rules.score, shield=rules.shield, silent_ball=rules.silent_ball)
+        if hasattr(self, 'difficulty') and self.difficulty.winfo_exists():
+            if self.difficulty.get() in Bot.LEVELS:
+                self.profile['difficulty'] = self.difficulty.get()
+        self.save_profile()
 
     def menu(self) -> None:
         if self.connection:
@@ -87,6 +172,7 @@ class Game:
         self.name = ttk.Entry(self.container)
         self.name.insert(0, str(self.profile["name"]))
         self.name.pack(fill="x", pady=5)
+        self.name.bind('<FocusOut>', self.remember_name)
         ttk.Button(self.container, text="Bota karşı oyna", command=self.offline_character_menu).pack(fill="x", pady=15)
         ttk.Button(self.container, text="Oyuncu olarak bağlan", command=lambda: self.online_menu(False)).pack(fill="x", pady=5)
         ttk.Button(self.container, text="İzleyici olarak bağlan", command=lambda: self.online_menu(True)).pack(fill="x", pady=5)
@@ -103,9 +189,10 @@ class Game:
             self.error.config(text="Ad 1 ile 24 karakter arasında olmalı.")
             return
         self.profile["name"] = name
+        self.save_profile()
         self.clear()
         ttk.Label(self.container, text="Karakterini seç", font=("Segoe UI", 16)).pack(anchor="w", pady=12)
-        self.character = ttk.Combobox(self.container, values=[f"Karakter {i + 1}" for i in range(5)],
+        self.character = ttk.Combobox(self.container, values=CHARACTERS,
                                        state="readonly")
         self.character.current(0)
         self.character.bind('<<ComboboxSelected>>', self.character_sound)
@@ -123,12 +210,14 @@ class Game:
         self.score = ttk.Entry(self.container)
         self.score.insert(0, str(self.profile["score"]))
         self.score.pack(fill="x", pady=5)
+        self.score.bind('<FocusOut>', self.remember_settings)
         self.shield = self.setting_toggle('Kalkan', bool(self.profile['shield']))
         self.silent = self.setting_toggle('Rastgele sessiz top', bool(self.profile['silent_ball']))
         ttk.Label(self.container, text="Bot zorluğu").pack(anchor="w")
         self.difficulty = ttk.Combobox(self.container, values=list(Bot.LEVELS), state="readonly")
         self.difficulty.set(str(self.profile["difficulty"]))
         self.difficulty.pack(fill="x", pady=5)
+        self.difficulty.bind('<<ComboboxSelected>>', self.remember_settings)
         self.error = ttk.Label(self.container, text="", foreground="#a22")
         self.error.pack(anchor="w")
         ttk.Button(self.container, text="Başla", command=self.start).pack(fill="x", pady=15)
@@ -163,6 +252,7 @@ class Game:
         self.status.pack(anchor="w", pady=5)
         self.canvas = tk.Canvas(self.container, background="#10202b", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, pady=8)
+        self.install_mouse_controls()
         ttk.Button(self.container, text="Ana menü", command=self.menu).pack(fill="x")
         self.canvas.focus_set()
         self.root.title("DragonPong Kaynak Klon - Maç başladı")
@@ -188,6 +278,8 @@ class Game:
         ttk.Label(self.container, text="Odalar", font=("Segoe UI", 17)).pack(anchor="w")
         self.rooms_list = tk.Listbox(self.container, height=12)
         self.rooms_list.pack(fill="both", expand=True, pady=12)
+        self.rooms_list.bind('<Return>', lambda _e: (self.spectate_room() if spectator else self.join_room(), 'break')[1])
+        self.rooms_list.bind('<<ListboxSelect>>', lambda _e: self.describe_focus(self.rooms_list))
         if spectator:
             ttk.Button(self.container, text="Seçili odayı izle", command=self.spectate_room).pack(fill="x", pady=3)
         else:
@@ -199,10 +291,14 @@ class Game:
         self.rooms_list.focus_set()
 
     def join_room(self) -> None:
-        if not self.online_rooms or not self.rooms_list.curselection():
+        if not self.rooms_list.curselection():
             self.root.bell()
             return
-        room = self.online_rooms[self.rooms_list.curselection()[0]]
+        index = self.rooms_list.curselection()[0]
+        if index >= len(self.online_rooms):
+            self.enter_room('create')
+            return
+        room = self.online_rooms[index]
         if not room["joinable"]:
             self.root.bell()
             return
@@ -226,7 +322,7 @@ class Game:
     def character_menu(self) -> None:
         self.clear()
         ttk.Label(self.container, text="Karakterini seç", font=("Segoe UI", 16)).pack(anchor="w", pady=12)
-        self.character = ttk.Combobox(self.container, values=[f"Karakter {i + 1}" for i in range(5)],
+        self.character = ttk.Combobox(self.container, values=CHARACTERS,
                                        state="readonly")
         self.character.current(0)
         self.character.bind('<<ComboboxSelected>>', self.character_sound)
@@ -250,11 +346,13 @@ class Game:
         def update(*_args):
             text.set(f"{label}: {'açık' if value.get() else 'kapalı'}")
         value.trace_add('write', update)
+        value.trace_add('write', lambda *_args: self.remember_settings())
         update()
         widget = ttk.Checkbutton(self.container, textvariable=text, variable=value)
         widget.pack(anchor='w', pady=5)
         widget.bind('<Left>', lambda _event: (value.set(False), 'break')[1])
         widget.bind('<Right>', lambda _event: (value.set(True), 'break')[1])
+        value.trace_add('write', lambda *_args: self.title_message(text.get()))
         return value
 
     def online_settings(self) -> None:
@@ -269,6 +367,7 @@ class Game:
         self.score = ttk.Entry(self.container)
         self.score.insert(0, str(self.profile["score"]))
         self.score.pack(fill="x")
+        self.score.bind('<FocusOut>', self.remember_settings)
         self.shield = self.setting_toggle('Kalkan', bool(self.profile['shield']))
         self.silent = self.setting_toggle('Rastgele sessiz top', bool(self.profile['silent_ball']))
         self.error = ttk.Label(self.container, text="", foreground="#a22")
@@ -304,6 +403,8 @@ class Game:
                     f"{room['host_name']} ile {room.get('guest_name') or 'rakibi'} maçta")
                 self.rooms_list.insert("end", label)
             if self.online_rooms:
+                if not self.browsing_spectator:
+                    self.rooms_list.insert('end', 'Yeni oda oluştur ve eş bekle')
                 self.rooms_list.selection_set(0)
             else:
                 self.rooms_list.insert("end", "Oda yok. Yeni oda oluşturabilirsin.")
@@ -321,7 +422,7 @@ class Game:
                 ttk.Label(self.container, text="İzleyici olarak bağlandın. Maç bekleniyor...").pack(anchor="w")
         elif kind == "characters" and self.online_player is not None:
             self.character_menu()
-        elif kind == "settings_required":
+        elif kind == "settings_required" and self.online_player is not None:
             self.online_settings()
         elif kind == "configured":
             self.clear()
@@ -338,13 +439,17 @@ class Game:
                 self.online_game_screen()
             self.online_state = message
             self.characters = message.get('characters', [0, 1])
-            self.score_label.config(text=f"Skor {message['scores'][0]} - {message['scores'][1]}")
+            score = f"Skor {message['scores'][0]} - {message['scores'][1]}"
+            ping_ms = getattr(self.connection, 'ping_ms', None)
+            if isinstance(ping_ms, (int, float)):
+                score += f"  |  Gecikme {round(ping_ms)} ms"
+            self.score_label.config(text=score)
             if self.online_player is not None:
                 self.audio.listener_x = message["paddles"][self.online_player]
             else:
                 self.audio.listener_x = message["paddles"][self.audio.listener]
             moving = any(message["velocity"])
-            self.audio.set_ball(Event("rolling", *message["ball"])
+            self.audio.set_ball(Event("rolling", *self.online_ball(message))
                                 if moving and not message["silent"] else None)
             self.audio.set_shields([Event('shield_loop', message['paddles'][p], p * COURT_LENGTH, player=p)
                                    for p, active in enumerate(message.get('shields', [])) if active])
@@ -361,6 +466,8 @@ class Game:
                     self.announce("Maç bitti.")
         elif kind == "perspective":
             self.audio.listener = message["player"]
+            if self.online_state:
+                self.audio.listener_x = self.online_state['paddles'][self.audio.listener]
             names = self.online_state.get('players', ['Oyuncu 1', 'Oyuncu 2']) if self.online_state else ['Oyuncu 1', 'Oyuncu 2']
             self.announce(f"{names[self.audio.listener]} gözünden izleniyor.")
         elif kind in ("room_closed", "disconnected", "connection_error", "rejected"):
@@ -379,13 +486,21 @@ class Game:
         self.status.pack(anchor="w", pady=5)
         self.canvas = tk.Canvas(self.container, background="#10202b", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, pady=8)
+        self.install_mouse_controls()
         ttk.Button(self.container, text="Ana menü", command=self.menu).pack(fill="x")
         self.canvas.focus_set()
 
     def key_down(self, event) -> None:
+        if event.keysym.lower() == 'escape':
+            self.menu()
+            return 'break'
         if not self.match and self.online_state is None:
             return
         key = event.keysym.lower()
+        if key in ('prior', 'next'):
+            self.audio.music_gain = max(0, min(1, self.audio.music_gain + (.1 if key == 'prior' else -.1)))
+            self.announce(f'Müzik sesi yüzde {round(self.audio.music_gain * 100)}')
+            return 'break'
         self.pressed.add(key)
         if key in ("space", "up"):
             if self.match:
@@ -395,7 +510,7 @@ class Game:
         elif key == "escape":
             self.menu()
         elif self.online_state is not None and self.online_player is None and key in ("left", "right"):
-            self.audio.listener = 0 if key == "left" else 1
+            self.audio.listener = (self.audio.listener + (1 if key == 'right' else -1)) % 2
             if self.connection:
                 self.connection.send("perspective", player=self.audio.listener)
         elif key in ('left', 'right', 'a', 'd'):
@@ -409,6 +524,9 @@ class Game:
         self.pressed.discard(event.keysym.lower())
 
     def tick(self) -> None:
+        active = bool(self.match or self.online_state is not None) and self.root.focus_displayof() is not None
+        for key in self.controller.poll(active):
+            self.key_down(type('Key', (), {'keysym': key})())
         now = time.perf_counter()
         dt = min(.05, max(0.0, now - self.last_tick))
         self.last_tick = now
@@ -437,6 +555,7 @@ class Game:
                                    for p, expiry in enumerate(match.shield_until) if expiry > match.time])
             self.draw()
         elif self.online_state is not None and self.connection:
+            self.connection.ping()
             self.draw()
         connection = self.connection
         if connection:
@@ -451,7 +570,15 @@ class Game:
     def announce(self, message: str) -> None:
         if self.match or self.online_state is not None:
             self.status.config(text=message)
-            self.root.title(f"DragonPong Kaynak Klon - {message}")
+            self.title_message(message)
+
+    def online_ball(self, state: dict | None = None) -> tuple[float, float]:
+        state = state or self.online_state
+        ping_ms = getattr(self.connection, 'ping_ms', None)
+        if not isinstance(ping_ms, (int, float)) or not 0 <= ping_ms < 1000:
+            return tuple(state['ball'])
+        age = max(0.0, time.monotonic() - state.get('_received_at', time.monotonic()))
+        return predict_ball(state['ball'], state['velocity'], min(.3, age + ping_ms / 1000))
 
     def draw(self) -> None:
         if not self.match and self.online_state is None:
@@ -469,7 +596,7 @@ class Game:
         c.create_line(*point(-HALF_WIDTH, 10), *point(HALF_WIDTH, 10), fill="#52717a", dash=(8, 6))
         paddles = self.match.paddles if self.match else self.online_state["paddles"]
         ball_x, ball_z = ((self.match.ball_x, self.match.ball_z) if self.match
-                          else self.online_state["ball"])
+                          else self.online_ball())
         for player, z, color in ((0, .3, "#49dca1"), (1, 19.7, "#ffae70")):
             x = paddles[player]
             c.create_line(*point(x - 1.25, z), *point(x + 1.25, z), fill=color, width=10)
@@ -477,6 +604,9 @@ class Game:
         c.create_oval(bx - 6, by - 6, bx + 6, by + 6, fill="white", outline="")
 
     def close(self) -> None:
+        if hasattr(self, 'name') and self.name.winfo_exists():
+            self.remember_name()
+        self.controller.close()
         if self.connection:
             self.connection.close()
         self.audio.close()

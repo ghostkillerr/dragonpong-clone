@@ -1,0 +1,146 @@
+[
+  {
+    "level": "Kolay",
+    "seed": 0,
+    "frames": 5031,
+    "scores": [
+      1,
+      3
+    ]
+  },
+  {
+    "level": "Kolay",
+    "seed": 1,
+    "frames": 8949,
+    "scores": [
+      2,
+      3
+    ]
+  },
+  {
+    "level": "Kolay",
+    "seed": 2,
+    "frames": 11065,
+    "scores": [
+      2,
+      3
+    ]
+  },
+  {
+    "level": "Kolay",
+    "seed": 3,
+    "frames": 4844,
+    "scores": [
+      1,
+      3
+    ]
+  },
+  {
+    "level": "Orta",
+    "seed": 0,
+    "frames": 6661,
+    "scores": [
+      3,
+      2
+    ]
+  },
+  {
+    "level": "Orta",
+    "seed": 1,
+    "frames": 13715,
+    "scores": [
+      2,
+      3
+    ]
+  },
+  {
+    "level": "Orta",
+    "seed": 2,
+    "frames": 7597,
+    "scores": [
+      0,
+      3
+    ]
+  },
+  {
+    "level": "Orta",
+    "seed": 3,
+    "frames": 5755,
+    "scores": [
+      3,
+      1
+    ]
+  },
+  {
+    "level": "Zor",
+    "seed": 0,
+    "frames": 5004,
+    "scores": [
+      1,
+      3
+    ]
+  },
+  {
+    "level": "Zor",
+    "seed": 1,
+    "frames": 8718,
+    "scores": [
+      1,
+      3
+    ]
+  },
+  {
+    "level": "Zor",
+    "seed": 2,
+    "frames": 7001,
+    "scores": [
+      0,
+      3
+    ]
+  },
+  {
+    "level": "Zor",
+    "seed": 3,
+    "frames": 6610,
+    "scores": [
+      0,
+      3
+    ]
+  },
+  {
+    "level": "Ultra",
+    "seed": 0,
+    "frames": 5533,
+    "scores": [
+      0,
+      3
+    ]
+  },
+  {
+    "level": "Ultra",
+    "seed": 1,
+    "frames": 6887,
+    "scores": [
+      1,
+      3
+    ]
+  },
+  {
+    "level": "Ultra",
+    "seed": 2,
+    "frames": 11608,
+    "scores": [
+      3,
+      1
+    ]
+  },
+  {
+    "level": "Ultra",
+    "seed": 3,
+    "frames": 11752,
+    "scores": [
+      3,
+      2
+    ]
+  }
+]

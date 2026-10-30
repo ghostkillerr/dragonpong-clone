@@ -6,6 +6,25 @@ from dragonpong.server import Server
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spectator_receives_finished_match_immediately(self):
+        from dragonpong.engine import Match, Rules
+        host, hw = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(hw, 'create', name='bir')
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.characters = {0: 0, 1: 1}
+        room.match = Match(Rules(score=30))
+        room.match.scores = [30, 5]
+        room.match.winner = 0
+        viewer, vw = await self.connect()
+        await self.send(vw, 'spectate', name='izleyen', room_id=room_id)
+        self.assertEqual((await self.receive(viewer))['type'], 'accepted')
+        state = await self.receive(viewer)
+        self.assertEqual(state['scores'], [30, 5])
+        self.assertEqual(state['winner'], 0)
     async def asyncSetUp(self):
         self.lobby = Server()
         self.server = await asyncio.start_server(self.lobby.handle, "127.0.0.1", 0)
@@ -152,6 +171,105 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         await self.send(writer, 'create', name='eski', protocol=1)
         self.assertEqual((await self.receive(reader))['type'], 'rejected')
         self.assertEqual(self.lobby.rooms, {})
+
+    async def test_new_protocol_sends_full_state_then_compact_frames(self):
+        host, hw = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(hw, 'rooms')
+        self.assertIn(3, (await self.receive(host))['protocols'])
+        await self.send(hw, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        await self.receive_type(host, 'characters')
+        await self.receive_type(guest, 'characters')
+        await self.send(hw, 'character', value=0)
+        await self.send(gw, 'character', value=1)
+        await self.receive_type(host, 'settings_required')
+        await self.receive_type(guest, 'settings_required')
+        await self.send(hw, 'configure', score=3, shield=False, silent_ball=False)
+        await self.receive_type(host, 'configured')
+        await self.receive_type(guest, 'configured')
+        await self.send(hw, 'start')
+        await self.receive_type(host, 'started')
+        first = await self.receive(host)
+        second = await self.receive(host)
+        self.assertEqual(first['type'], 'state')
+        self.assertEqual(second['type'], 'frame')
+        self.assertEqual(second['p'], first['paddles'])
+        self.assertEqual(second['s'], first['scores'])
+
+    async def test_early_strike_is_kept_until_ball_enters_hit_range(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        await self.send(writer, 'create', name='bir')
+        room_id = (await self.receive(host))['room_id']
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        room.match.ball_z = 6.1
+        room.match.vz = -3
+        await self.send(writer, 'strike')
+        await self.send(writer, 'rooms')
+        await self.receive_type(host, 'rooms')
+        self.assertLess(room.match.vz, 0)
+        self.lobby.step_match(room, .051)
+        self.assertGreater(room.match.vz, 0)
+
+    async def test_buffered_strike_expires_before_later_rally(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        await self.send(writer, 'create', name='bir')
+        room_id = (await self.receive(host))['room_id']
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        room.match.ball_z = 8
+        room.match.vz = -3
+        await self.send(writer, 'strike')
+        await self.send(writer, 'rooms')
+        await self.receive_type(host, 'rooms')
+        room.match.step(.25)
+        room.match.step(.017)
+        room.match.ball_z = 5
+        self.lobby.step_match(room, 0)
+        self.assertLess(room.match.vz, 0)
+        self.assertFalse(room.pending_strikes)
+
+    async def test_misaligned_press_inside_hit_zone_is_not_buffered(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        await self.send(writer, 'create', name='bir')
+        room_id = (await self.receive(host))['room_id']
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        room.match.ball_x = 8
+        room.match.ball_z = 3
+        room.match.vz = -3
+        await self.send(writer, 'strike')
+        await self.send(writer, 'rooms')
+        await self.receive_type(host, 'rooms')
+        room.match.paddles[0] = 8
+        self.lobby.step_match(room, .017)
+        self.assertLess(room.match.vz, 0)
+
+    async def test_fast_ball_hits_buffered_strike_between_physics_ticks(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        await self.send(writer, 'create', name='bir')
+        room_id = (await self.receive(host))['room_id']
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        room.match.ball_z = 6.1
+        room.match.vz = -120
+        await self.send(writer, 'strike')
+        await self.send(writer, 'rooms')
+        await self.receive_type(host, 'rooms')
+        self.lobby.step_match(room, .05)
+        self.assertGreater(room.match.vz, 0)
+        self.assertEqual(room.match.scores, [0, 0])
 
 
 if __name__ == "__main__":

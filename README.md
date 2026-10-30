@@ -21,6 +21,12 @@ ve ardından `python run_offline.py` çalıştırın; Python komutunda varsayıl
 sunucu adresi `127.0.0.1`. Başka bir sunucu için `DRAGONPONG_CLONE_HOST`
 ortam değişkenini ayarlayın.
 
+Yeni istemci oda listesinden sunucu sürümünü öğrenir. Güncel sunucuda küçük
+durum paketleri kullanır; eski v2 sunucuda eski protokolle çalışmaya devam eder.
+Oyuncu güncellemeleri 60 Hz, izleyici güncellemeleri 20 Hz'dir. Bağlantı
+gecikmesi maç sırasında skorun yanında gösterilir ve topun gösterilen konumu
+bu ölçüme göre öngörülür. Maçın fizik ve skor kararı sunucudadır.
+
 ## Oynanış
 
 - Ana menüde adını yaz; çevrimdışı veya çevrimiçi odaya gir.
@@ -42,6 +48,9 @@ iletir, her istemci sesi yerel olarak üretir. Kulaklık önerilir. KEMAR genel 
 baş ölçümüdür; kişiden kişiye ön/arka algısı değişebilir.
 
 ## Durum
+
+v2.2'de release_v7 özellik denetiminde bulunan klavye, profil, fare/kontrolcü
+ve izleyici giriş eksikleri giderildi. [Özellik karşılaştırması](V7_COMPARISON.md).
 
 v2.1'de fazla yan duvar sekmesine neden olan vuruş sonrası konum ve derinlik
 hesabı düzeltildi. [Fizik karşılaştırması](PHYSICS_COMPARISON.md) özgün EXE ile

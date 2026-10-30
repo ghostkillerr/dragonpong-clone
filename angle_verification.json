@@ -1,0 +1,9 @@
+{
+  "cases": 1080,
+  "max_angle_difference_degrees": 7.105427357601002e-15,
+  "serve_degrees": 11.30993206355212,
+  "first_hit_most_lateral_degrees": 50.1944278580131,
+  "first_hit_least_lateral_degrees": 5.710592926169536,
+  "scope": "Identical positions and controlled random speed increases, original x86 strike vs current engine",
+  "excluded": "Different player inputs/RNG sequences, HRTF perception, real network speed serialization"
+}

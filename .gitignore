@@ -3,6 +3,8 @@ __pycache__/
 .testdeps/
 build/
 dist/
+build_*/
+dist_*/
 reference_sounds/
 *.spec
 release_local_*/
