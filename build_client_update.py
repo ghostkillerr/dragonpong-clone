@@ -19,8 +19,8 @@ def build(exe: Path, version: str, output: Path) -> tuple[Path, Path, Path]:
         raise ValueError("EXE is missing or empty")
     output.mkdir(parents=True, exist_ok=True)
     tag = f"v{version}"
-    name = f"DragonPongClone_client_{tag}.zip"
-    archive_path = output / name
+    asset_name = f"DragonPongClone_client_{tag}.zip"
+    archive_path = output / asset_name
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.write(exe, "DragonPongClone.exe")
     with zipfile.ZipFile(archive_path) as archive:
@@ -30,8 +30,8 @@ def build(exe: Path, version: str, output: Path) -> tuple[Path, Path, Path]:
     base = Path(__file__).resolve().parent
     with zipfile.ZipFile(bootstrap_path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.write(exe, "DragonPongClone.exe")
-        for name in ("start_clone.bat", "update_launcher.ps1", "OYNA.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
-            archive.write(base / name, name)
+        for filename in ("start_clone.bat", "update_launcher.ps1", "OYNA.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+            archive.write(base / filename, filename)
         archive.writestr("client_version.txt", version)
     with zipfile.ZipFile(bootstrap_path) as archive:
         if archive.testzip() is not None:
@@ -42,7 +42,7 @@ def build(exe: Path, version: str, output: Path) -> tuple[Path, Path, Path]:
         "version": version,
         "package_url": (
             "https://github.com/ghostkillerr/dragonpong-clone/releases/download/"
-            f"{tag}/{name}"
+            f"{tag}/{asset_name}"
         ),
         "sha256": digest,
     }
