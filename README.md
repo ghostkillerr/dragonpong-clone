@@ -16,6 +16,26 @@ python run_offline.py
 ```
 
 `start_clone.bat` internet odalarını mevcut VPS'deki 8870 portuna bağlar.
+Arkadaşlara verilen Windows paketinde aynı dosya `update_launcher.ps1` üzerinden
+GitHub'daki `update.json` dosyasını kontrol eder. Yeni sürümün ZIP dosyasını
+indirir, SHA-256 ile doğrular, oyun açılmadan EXE'yi değiştirir ve eski EXE'yi
+`.previous` adıyla saklar. Çevrimdışıysa kurulu sürüm açılır. Bu mekanizma
+ancak paketi `start_clone.bat` ile başlatan oyunculara işler.
+
+Yeni istemci sürümünü yayımlama sırası:
+
+1. `build_exe.bat` ile EXE oluştur ve oyun testlerini çalıştır.
+2. `python build_client_update.py 2.5.0` ile `dist_update` içindeki güncelleme
+   ZIP'ini, ilk kurulum ZIP'ini ve manifesti üret.
+3. İki ZIP'i aynı sürüm etiketiyle (`v2.5.0`) GitHub Release'e yükle.
+4. ZIP'in indirildiğini doğrula; ardından üretilen `update.json` dosyasını
+   deponun `main` dalındaki dosyayla değiştir. Manifest son yayımlanır.
+5. Arkadaşların ilk kurulum ZIP'ini bir kez indirmesi
+   gerekir. Sonraki EXE sürümleri açılışta alınır.
+
+Kamuya açık güncelleme ZIP'i yalnızca yeni EXE'yi içerir. Yerel referans ses
+dosyalarını GitHub Release'e yükleme. Turnuva için istemci sürüm zorlaması
+gerekiyorsa ayrıca sunucu sürüm denetimi eklenmelidir.
 Yerel geliştirme için `python -m dragonpong.server --host 127.0.0.1 --port 8870`
 ve ardından `python run_offline.py` çalıştırın; Python komutunda varsayılan
 sunucu adresi `127.0.0.1`. Başka bir sunucu için `DRAGONPONG_CLONE_HOST`

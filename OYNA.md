@@ -1,6 +1,9 @@
 # Kaynak klonunu oyna
 
-`start_clone.bat` dosyasını aç. Oyun penceresinden adını yazıp çevrimdışı,
+`start_clone.bat` dosyasını aç. Paketli EXE varsa başlatıcı yeni sürümü
+denetler; yeni paket indirilip SHA-256 doğrulandıktan sonra oyun açılır.
+İnternet yoksa mevcut sürüm açılır. EXE dosyasını doğrudan açarsan güncelleme
+denetimi yapılmaz. Oyun penceresinden adını yazıp çevrimdışı,
 oyuncu veya izleyici olarak bağlan. Çevrimiçi oyuncular aynı v2 sürümünü kullanmalıdır.
 
 Oyuncu bağlanınca bekleyen oda yoksa otomatik yeni oda açılır. Varsa adı yazan

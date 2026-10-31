@@ -18,17 +18,20 @@ if not re.fullmatch(r'v[0-9]+(?:_[0-9]+)*', VERSION):
     raise ValueError('Invalid package version')
 LOCAL = BASE / f'release_local_{VERSION}'
 LOCAL.mkdir(exist_ok=True)
-for name in ('start_clone.bat', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'PARITY.md', 'PHYSICS_COMPARISON.md', 'V7_COMPARISON.md'):
+for name in ('start_clone.bat', 'update_launcher.ps1', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'PARITY.md', 'PHYSICS_COMPARISON.md', 'V7_COMPARISON.md'):
     shutil.copy2(BASE / name, LOCAL / name)
-shutil.copy2(args.exe, LOCAL / 'DragonPongClone.exe')
+parts = VERSION[1:].split('_')
+(LOCAL / 'client_version.txt').write_text('.'.join((parts + ['0', '0'])[:3]), encoding='utf-8')
+if args.exe.resolve() != (LOCAL / 'DragonPongClone.exe').resolve():
+    shutil.copy2(args.exe, LOCAL / 'DragonPongClone.exe')
 shutil.copytree(BASE / 'reference_sounds', LOCAL / 'reference_sounds', dirs_exist_ok=True)
 source = [p for folder in ('dragonpong', 'tests') for p in (BASE / folder).glob('*.py')]
 source += [BASE / name for name in (
-    'run_offline.py', 'prepare_reference_sounds.py', 'verify_native.py', 'package_v2.py', 'verify_public.py',
+    'run_offline.py', 'prepare_reference_sounds.py', 'verify_native.py', 'package_v2.py', 'build_client_update.py', 'verify_public.py',
     'verify_rallies.py', 'PHYSICS_COMPARISON.md', 'rally_baseline.json', 'rally_verification.json',
     'V7_COMPARISON.md', 'AGENTS.md',
     'requirements.txt', 'requirements-dev.txt', 'start_clone.bat', 'start_server.bat',
-    'build_exe.bat', 'README.md', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+    'build_exe.bat', 'update_launcher.ps1', 'client_version.txt', 'update.json', 'README.md', 'OYNA.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
     'PARITY.md', 'REGRESSION.md', 'native_verification.json', '.gitignore',
     'assets/mit-kemar-compact.zip')]
 archives = []

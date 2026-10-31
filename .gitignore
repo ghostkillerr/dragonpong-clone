@@ -5,6 +5,8 @@ build/
 dist/
 build_*/
 dist_*/
+dist_update/
+*.previous
 reference_sounds/
 *.spec
 release_local_*/
