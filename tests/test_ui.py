@@ -1,5 +1,6 @@
 """Real Tk widgets with audio mocked; never touches the real saved profile."""
 import json
+import queue
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,6 +78,115 @@ class UITests(unittest.TestCase):
             x, z = self.game.online_ball(state)
         self.assertAlmostEqual(x, 1.5)
         self.assertAlmostEqual(z, 8.5)
+
+    def test_network_state_is_applied_before_frame_is_drawn(self):
+        self.game.connection = MagicMock()
+        self.game.online_state = {'type': 'state', 'ball': [0, 0]}
+        self.game.controller.poll.return_value = []
+        incoming = {'type': 'state', 'ball': [1, 1]}
+        self.game.connection.events.get_nowait.side_effect = [incoming, queue.Empty]
+        drawn = []
+        with (patch.object(self.game, 'online_message',
+                           side_effect=lambda message: setattr(self.game, 'online_state', message)),
+              patch.object(self.game, 'draw',
+                           side_effect=lambda: drawn.append(self.game.online_state['ball'][:])),
+              patch.object(self.game.root, 'after')):
+            self.game.tick()
+        self.assertEqual(drawn, [[1, 1]])
+
+    def test_online_step_is_shown_immediately_with_server_ack_support(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        with patch.object(self.game, 'draw') as draw:
+            self.game.key_down(SimpleNamespace(keysym='Right'))
+        self.game.connection.send.assert_called_once_with('step', direction=1, seq=1)
+        self.assertEqual(self.game.predicted_paddles(), [1, 0])
+        self.assertEqual(self.game.audio.listener_x, 1)
+        draw.assert_called_once()
+
+    def test_authoritative_ack_reconciles_without_double_movement(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.connection.ping_ms = None
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        self.game.score_label = MagicMock()
+        self.game.paddle_prediction.add(1)
+        self.game.paddle_prediction.add(1)
+        def state(x, ack):
+            return {'type': 'state', 'paddles': [x, 0], 'step_ack': [ack, 0],
+                    'scores': [0, 0], 'velocity': [0, 0], 'ball': [0, 0],
+                    'silent': False, 'shields': [], 'events': []}
+        self.game.online_message(state(1, 1))
+        self.assertEqual(self.game.predicted_paddles()[0], 2)
+        self.assertEqual(self.game.audio.listener_x, 2)
+        self.game.online_message(state(2, 2))
+        self.assertEqual(self.game.predicted_paddles()[0], 2)
+
+    def test_old_server_keeps_authoritative_paddle_display(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = False
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0]}
+        self.game.key_down(SimpleNamespace(keysym='Right'))
+        self.game.connection.send.assert_called_once_with('step', direction=1)
+        self.assertEqual(self.game.predicted_paddles()[0], 0)
+
+    def test_missing_ack_disables_prediction_without_changing_server_position(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.connection.ping_ms = None
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        self.game.score_label = MagicMock()
+        self.game.paddle_prediction.add(1)
+        self.game.online_message({'type': 'state', 'paddles': [0, 0],
+                                  'scores': [0, 0], 'velocity': [0, 0],
+                                  'ball': [0, 0], 'silent': False,
+                                  'shields': [], 'events': []})
+        self.assertFalse(self.game.connection.supports_step_ack)
+        self.assertEqual(self.game.predicted_paddles()[0], 0)
+
+    def test_leaving_room_discards_unacknowledged_prediction(self):
+        self.game.paddle_prediction.add(1)
+        self.game.menu()
+        self.assertEqual(self.game.paddle_prediction.position(0, player=0), 0)
+
+    def test_guest_immediate_display_uses_mirrored_world_direction(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.online_player = 1
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        with patch.object(self.game, 'draw'):
+            self.game.key_down(SimpleNamespace(keysym='Right'))
+        self.assertEqual(self.game.predicted_paddles(), [0, -1])
+        self.assertEqual(self.game.audio.listener_x, -1)
+
+    def test_failed_step_send_clears_visual_prediction(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.connection.send.side_effect = ConnectionError('offline')
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        self.game.key_down(SimpleNamespace(keysym='Right'))
+        self.assertIsNone(self.game.connection)
+        self.assertEqual(self.game.paddle_prediction.position(0, player=0), 0)
+
+    def test_final_score_uses_authoritative_paddle_position(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_step_ack = True
+        self.game.connection.ping_ms = None
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], 'step_ack': [0, 0]}
+        self.game.score_label = MagicMock()
+        self.game.paddle_prediction.add(1)
+        self.game.online_message({'type': 'state', 'paddles': [0, 0],
+                                  'step_ack': [0, 0], 'scores': [3, 0],
+                                  'winner': 0, 'velocity': [0, 0], 'ball': [0, 0],
+                                  'silent': False, 'shields': [], 'events': []})
+        self.assertEqual(self.game.predicted_paddles()[0], 0)
 
     def test_music_stops_before_settings_and_match(self):
         self.start_offline()

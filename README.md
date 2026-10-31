@@ -27,6 +27,14 @@ Oyuncu güncellemeleri 60 Hz, izleyici güncellemeleri 20 Hz'dir. Bağlantı
 gecikmesi maç sırasında skorun yanında gösterilir ve topun gösterilen konumu
 bu ölçüme göre öngörülür. Maçın fizik ve skor kararı sunucudadır.
 
+Sunucu oda listesinde `step_ack` özelliğini bildirirse istemci her hareket
+komutuna artan bir `seq` ekler. Sunucu komutu bir kez uygular ve işlediği son
+numarayı tam durumda `step_ack`, küçük karede `a` alanıyla bildirir. İstemci
+yalnızca kendi raketini onay gelene kadar yerel olarak gösterir; vuruş, sınır ve
+skor hesabı sunucuda kalır. Özelliği bildirmeyen eski sunucuda hareketlerin
+gösterimi önceki gibi doğrudan sunucu konumunu izler. Geçiş sırası: önce sunucu,
+sonra istemci; sunucu geri alınırsa yeniden bağlanan istemci eski davranışa döner.
+
 ## Oynanış
 
 - Ana menüde adını yaz; çevrimdışı veya çevrimiçi odaya gir.

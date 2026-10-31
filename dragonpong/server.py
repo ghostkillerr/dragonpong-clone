@@ -23,7 +23,7 @@ def compact_state(state: dict[str, Any]) -> dict[str, Any]:
     return {"type": "frame", "b": state["ball"], "v": state["velocity"],
             "p": state["paddles"], "s": state["scores"], "sr": state["serving"],
             "w": state["winner"], "si": state["silent"], "sh": state["shields"],
-            "r": state["ready"], "e": state["events"]}
+            "r": state["ready"], "e": state["events"], "a": state["step_ack"]}
 
 
 @dataclass(eq=False)
@@ -38,6 +38,7 @@ class Client:
     state_sent: bool = False
     pending_events: list[dict[str, Any]] = field(default_factory=list)
     slow_since: float | None = None
+    last_step_seq: int = 0
 
     async def send(self, message: dict[str, Any]) -> None:
         self.writer.write((json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n").encode())
@@ -145,7 +146,7 @@ class Server:
             return
         if kind == "rooms":
             await client.send({"type": "rooms", "rooms": self.room_list(),
-                               "protocols": [2, 3]})
+                               "protocols": [2, 3], "features": ["step_ack"]})
             return
         if kind in ("create", "join", "spectate"):
             if type(message.get('protocol')) is not int or message['protocol'] not in (2, 3):
@@ -227,7 +228,17 @@ class Server:
             value = message.get("direction")
             if type(value) is not int or value not in (-1, 1):
                 raise ValueError("invalid movement")
+            if "seq" in message:
+                seq = message["seq"]
+                if type(seq) is not int or not 1 <= seq <= 2_147_483_647:
+                    raise ValueError("invalid movement sequence")
+                if seq <= client.last_step_seq:
+                    return
+                if seq != client.last_step_seq + 1:
+                    raise ValueError("out-of-order movement sequence")
             room.match.move_step(client.player, value * (1 if client.player == 0 else -1))
+            if "seq" in message:
+                client.last_step_seq = seq
         elif kind in ("serve", "strike") and client.player is not None and room.match and room.started:
             match = room.match
             player = client.player
@@ -308,6 +319,7 @@ class Server:
                          "shields": [match.time < expiry for expiry in match.shield_until],
                          "players": [room.host.name, room.guest.name],
                          "characters": [room.characters[0], room.characters[1]],
+                         "step_ack": [room.host.last_step_seq, room.guest.last_step_seq],
                          "ready": match.time >= match.ready_at,
                          "events": [event.__dict__ for event in events]}
 

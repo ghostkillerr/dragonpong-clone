@@ -176,7 +176,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         host, hw = await self.connect()
         guest, gw = await self.connect()
         await self.send(hw, 'rooms')
-        self.assertIn(3, (await self.receive(host))['protocols'])
+        lobby = await self.receive(host)
+        self.assertIn(3, lobby['protocols'])
+        self.assertIn('step_ack', lobby['features'])
         await self.send(hw, 'create', name='bir', protocol=3)
         room_id = (await self.receive(host))['room_id']
         await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
@@ -198,6 +200,134 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second['type'], 'frame')
         self.assertEqual(second['p'], first['paddles'])
         self.assertEqual(second['s'], first['scores'])
+        self.assertEqual(second['a'], first['step_ack'])
+
+    async def test_sequenced_steps_are_applied_once_and_acked_for_both_players(self):
+        from dragonpong.engine import Match
+        host, hw = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(hw, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.characters = {0: 0, 1: 1}
+        room.match = Match()
+        room.started = True
+        await self.send(hw, 'step', direction=1, seq=1)
+        await self.send(hw, 'step', direction=1, seq=1)
+        await self.send(hw, 'step', direction=-1, seq=2)
+        await self.send(gw, 'step', direction=1, seq=1)
+        for reader, writer in ((host, hw), (guest, gw)):
+            await self.send(writer, 'rooms')
+            await self.receive_type(reader, 'rooms')
+        self.assertEqual(room.match.paddles, [0, -1])
+        self.assertEqual(self.lobby.snapshot(room)['step_ack'], [2, 1])
+        self.assertEqual(len([event for event in room.match.events if event.kind == 'move']), 3)
+
+    async def test_unsequenced_legacy_step_keeps_native_one_unit_behavior(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(writer, 'create', name='bir', protocol=2)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=2)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.characters = {0: 0, 1: 1}
+        room.match = Match()
+        room.started = True
+        await self.send(writer, 'step', direction=1)
+        await self.send(writer, 'rooms')
+        await self.receive_type(host, 'rooms')
+        self.assertEqual(room.match.paddles[0], 1)
+        self.assertEqual(self.lobby.snapshot(room)['step_ack'][0], 0)
+
+    async def test_sequenced_step_preserves_strike_and_ball_physics(self):
+        from dragonpong.engine import Match, Rules
+        host, writer = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(writer, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.characters = {0: 0, 1: 1}
+        room.match = Match(Rules(shield=False, silent_ball=False), seed=17)
+        baseline = Match(Rules(shield=False, silent_ball=False), seed=17)
+        for match in (room.match, baseline):
+            match.ball_x, match.ball_z, match.vz = 1, 3, -3
+        room.started = True
+        await self.lobby.dispatch(room.host, {'type': 'step', 'direction': 1, 'seq': 1})
+        await self.lobby.dispatch(room.host, {'type': 'strike'})
+        baseline.move_step(0, 1)
+        baseline.strike(0)
+        room.match.step(.017)
+        baseline.step(.017)
+        self.assertEqual((room.match.paddles, room.match.ball_x, room.match.ball_z,
+                          room.match.vx, room.match.vz, room.match.scores),
+                         (baseline.paddles, baseline.ball_x, baseline.ball_z,
+                          baseline.vx, baseline.vz, baseline.scores))
+
+    async def test_out_of_order_step_cannot_move_paddle(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(writer, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        with self.assertRaises(ValueError):
+            await self.lobby.dispatch(room.host, {'type': 'step', 'direction': 1, 'seq': 2})
+        self.assertEqual(room.match.paddles[0], 0)
+        self.assertEqual(room.host.last_step_seq, 0)
+
+    async def test_border_step_is_acknowledged_without_crossing_boundary(self):
+        from dragonpong.engine import Match
+        host, writer = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(writer, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.match = Match()
+        room.started = True
+        room.match.paddles[0] = 9
+        await self.lobby.dispatch(room.host, {'type': 'step', 'direction': 1, 'seq': 1})
+        self.assertEqual(room.match.paddles[0], 9)
+        self.assertEqual(room.host.last_step_seq, 1)
+        self.assertEqual(room.match.events[-1].kind, 'border')
+
+    async def test_step_ack_reaches_player_in_compact_network_frame(self):
+        host, hw = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(hw, 'create', name='bir', protocol=3)
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='iki', room_id=room_id, protocol=3)
+        await self.receive(guest)
+        await self.receive_type(host, 'characters')
+        await self.receive_type(guest, 'characters')
+        await self.send(hw, 'character', value=0)
+        await self.send(gw, 'character', value=1)
+        await self.receive_type(host, 'settings_required')
+        await self.receive_type(guest, 'settings_required')
+        await self.send(hw, 'configure', score=3, shield=False, silent_ball=False)
+        await self.receive_type(host, 'configured')
+        await self.receive_type(guest, 'configured')
+        await self.send(hw, 'start')
+        await self.receive_type(host, 'started')
+        await self.receive_type(host, 'state')
+        await self.send(hw, 'step', direction=1, seq=1)
+        for _ in range(20):
+            frame = await self.receive_type(host, 'frame')
+            if frame['a'][0] == 1:
+                break
+        self.assertEqual(frame['p'][0], 1)
+        self.assertEqual(frame['a'][0], 1)
 
     async def test_early_strike_is_kept_until_ball_enters_hit_range(self):
         from dragonpong.engine import Match

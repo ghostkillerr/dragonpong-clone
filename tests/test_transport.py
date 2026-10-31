@@ -45,6 +45,15 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(expand_frame(compact, self.state()), full)
         self.assertLess(len(str(compact)), len(str(full)))
 
+    def test_old_compact_frame_without_ack_still_decodes(self):
+        old_state = self.state()
+        old_state.pop('step_ack')
+        frame = compact_state(self.state())
+        frame.pop('a')
+        decoded = expand_frame(frame, old_state)
+        self.assertNotIn('step_ack', decoded)
+        self.assertEqual(decoded['paddles'], old_state['paddles'])
+
     def test_old_states_are_coalesced_without_losing_gameplay_events(self):
         inbox = LatestEventQueue()
         inbox.put({'type': 'state', 'ball': [1, 1], 'events': [{'kind': 'paddle'}]})
@@ -96,18 +105,22 @@ class TransportTests(unittest.TestCase):
         self.assertIn(b'"kind":"goal"', writer.writes[0])
 
     def test_client_negotiates_new_protocol_and_falls_back_to_old_server(self):
-        for advertised, expected in (([2, 3], 3), (None, 2)):
-            with self.subTest(advertised=advertised):
+        for advertised, feature, expected in (([2, 3], True, 3),
+                                              ([2, 3], False, 3),
+                                              (None, False, 2)):
+            with self.subTest(advertised=advertised, feature=feature):
                 sock = MagicMock()
                 room_list = {'type': 'rooms', 'rooms': []}
                 if advertised is not None:
                     room_list['protocols'] = advertised
+                    room_list['features'] = ['step_ack'] if feature else []
                 sock.makefile.return_value = io.BytesIO((json.dumps(room_list) + '\n').encode())
                 with patch('dragonpong.client.socket.create_connection', return_value=sock):
                     connection = Connection()
                 connection.thread.join(1)
                 connection.send('create', name='bir')
                 self.assertEqual(connection.protocol, expected)
+                self.assertEqual(connection.supports_step_ack, feature)
                 self.assertEqual(json.loads(sock.sendall.call_args.args[0])['protocol'], expected)
                 sock.setsockopt.assert_called_once()
                 connection.close()

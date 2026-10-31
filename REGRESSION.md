@@ -72,3 +72,13 @@ Ek kabul kanıtları (28 Ekim 2026):
   30 skor ayarı. Kullanıcının kayıtlı profili yerine geçici profil kullanılır.
 - `dragonpong-clone.service` aktif. Son geri dönüş yedeği:
   `/opt/dragonpong/clone-backup-1793206487833608014`. Eski v7 rölesi değiştirilmedi.
+
+Ek yerel doğrulama (31 Ekim 2026): hareket sıra numarası ve istemci raket
+tahmini için 82 test geçti. Gecikmiş/eski onay, yinelenen ve ters yönlü komut,
+iki oyuncu koordinatı, saha sınırı, bağlantı hatası, bitiş ve eski sunucuya
+dönüş senaryoları kapsandı. Yerel TCP testinde onay küçük durum paketine ulaştı.
+Özgün x86 karşılaştırmasında 7.108 hareket/vuruş durumu sıfır fark, 1.080 vuruş
+açısı en çok 7,2e-15 derece fark ve 25.687 uzun ralli uçuş adımı önceki
+sonuçlarla eşleşti. `engine.py` değiştirilmedi; yerel raket tahmini skor veya
+vuruş kararı üretmez. Dağıtım öncesi canlı sunucu `step_ack` özelliğini
+bildirmiyordu; istemcinin eski davranışa dönüşü gerçek bağlantıyla doğrulandı.

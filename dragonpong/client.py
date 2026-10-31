@@ -55,9 +55,12 @@ class LatestEventQueue:
 
 
 def expand_frame(frame: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
-    return {**previous, **{long_name: frame[short_name]
+    state = {**previous, **{long_name: frame[short_name]
                           for short_name, long_name in FRAME_FIELDS.items()},
-            "type": "state"}
+             "type": "state"}
+    if "a" in frame:
+        state["step_ack"] = frame["a"]
+    return state
 
 
 def predict_ball(ball: list[float], velocity: list[float], seconds: float) -> tuple[float, float]:
@@ -69,6 +72,40 @@ def predict_ball(ball: list[float], velocity: list[float], seconds: float) -> tu
     return x, z
 
 
+class PaddlePrediction:
+    """Replay only unacknowledged local steps over the server paddle position."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.next_seq = 1
+        self.last_ack = 0
+        self.pending: deque[tuple[int, int]] = deque()
+
+    def add(self, direction: int) -> int:
+        if direction not in (-1, 1):
+            raise ValueError("invalid movement")
+        seq = self.next_seq
+        self.next_seq += 1
+        self.pending.append((seq, direction))
+        return seq
+
+    def acknowledge(self, seq: int) -> None:
+        if type(seq) is not int or not self.last_ack <= seq < self.next_seq:
+            return
+        self.last_ack = seq
+        while self.pending and self.pending[0][0] <= seq:
+            self.pending.popleft()
+
+    def position(self, server_x: float, player: int) -> float:
+        factor = 1 if player == 0 else -1
+        x = server_x
+        for _, direction in self.pending:
+            x = max(-HALF_WIDTH, min(HALF_WIDTH, x + factor * direction))
+        return x
+
+
 class Connection:
     def __init__(self) -> None:
         self.socket = socket.create_connection((HOST, PORT), timeout=3)
@@ -78,6 +115,7 @@ class Connection:
         self.lock = threading.Lock()
         self.closed = False
         self.protocol = 2
+        self.supports_step_ack = False
         self.ping_ms: float | None = None
         self.last_ping_at = 0.0
         self.ping_nonce: int | None = None
@@ -116,6 +154,10 @@ class Connection:
                         protocols = message.get("protocols", [])
                         if isinstance(protocols, list) and LATEST_PROTOCOL in protocols:
                             self.protocol = LATEST_PROTOCOL
+                        features = message.get("features", [])
+                        self.supports_step_ack = (self.protocol == LATEST_PROTOCOL and
+                                                  isinstance(features, list) and
+                                                  "step_ack" in features)
                     if message.get("type") == "pong":
                         if message.get("nonce") == self.ping_nonce:
                             self.ping_ms = (time.monotonic() - self.last_ping_at) * 1000

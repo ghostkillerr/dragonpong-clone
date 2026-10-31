@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import ttk
 
 from dragonpong.audio import AudioOutput
-from dragonpong.client import Connection, predict_ball
+from dragonpong.client import Connection, PaddlePrediction, predict_ball
 from dragonpong.engine import Bot, COURT_LENGTH, Event, HALF_WIDTH, Match, Rules
 from dragonpong.controls import ControllerInput
 
@@ -59,6 +59,7 @@ class Game:
         self.match: Match | None = None
         self.bot: Bot | None = None
         self.connection: Connection | None = None
+        self.paddle_prediction = PaddlePrediction()
         self.online_state: dict | None = None
         self.online_player: int | None = None
         self.online_rooms: list[dict] = []
@@ -159,6 +160,7 @@ class Game:
         self.match = None
         self.online_state = None
         self.online_player = None
+        self.paddle_prediction.reset()
         self.pressed.clear()
         self.last_direction = 0
         self.audio.listener = 0
@@ -411,6 +413,7 @@ class Game:
                 self.online_rooms = []
         elif kind == "accepted":
             self.online_player = message.get("player")
+            self.paddle_prediction.reset()
             self.audio.listener = self.online_player if self.online_player is not None else 0
             self.root.title("DragonPong Kaynak Klon - Odaya bağlandı")
             if self.online_player == 0:
@@ -438,6 +441,16 @@ class Game:
             if self.online_state is None:
                 self.online_game_screen()
             self.online_state = message
+            if self.online_player is not None and getattr(self.connection, 'supports_step_ack', False) is True:
+                acknowledgements = message.get('step_ack')
+                if (isinstance(acknowledgements, list) and len(acknowledgements) == 2 and
+                        type(acknowledgements[self.online_player]) is int):
+                    self.paddle_prediction.acknowledge(acknowledgements[self.online_player])
+                else:
+                    self.connection.supports_step_ack = False
+                    self.paddle_prediction.reset()
+            if message.get('winner') is not None:
+                self.paddle_prediction.reset()
             self.characters = message.get('characters', [0, 1])
             score = f"Skor {message['scores'][0]} - {message['scores'][1]}"
             ping_ms = getattr(self.connection, 'ping_ms', None)
@@ -445,7 +458,7 @@ class Game:
                 score += f"  |  Gecikme {round(ping_ms)} ms"
             self.score_label.config(text=score)
             if self.online_player is not None:
-                self.audio.listener_x = message["paddles"][self.online_player]
+                self.audio.listener_x = self.predicted_paddles()[self.online_player]
             else:
                 self.audio.listener_x = message["paddles"][self.audio.listener]
             moving = any(message["velocity"])
@@ -505,7 +518,8 @@ class Game:
         if key in ("space", "up"):
             if self.match:
                 self.match.strike(0)
-            elif self.connection and self.online_player is not None:
+            elif (self.connection and self.online_player is not None and
+                  self.online_state.get('winner') is None):
                 self.connection.send("strike")
         elif key == "escape":
             self.menu()
@@ -517,8 +531,20 @@ class Game:
             direction = 1 if key in ('right', 'd') else -1
             if self.match:
                 self.match.move_step(0, direction)
-            elif self.connection and self.online_player is not None:
-                self.connection.send('step', direction=direction)
+            elif (self.connection and self.online_player is not None and
+                  self.online_state.get('winner') is None):
+                try:
+                    if (getattr(self.connection, 'supports_step_ack', False) is True and
+                            'step_ack' in self.online_state):
+                        seq = self.paddle_prediction.add(direction)
+                        self.connection.send('step', direction=direction, seq=seq)
+                        self.audio.listener_x = self.predicted_paddles()[self.online_player]
+                        self.draw()
+                    else:
+                        self.connection.send('step', direction=direction)
+                except (ConnectionError, OSError) as exc:
+                    self.paddle_prediction.reset()
+                    self.online_message({'type': 'connection_error', 'reason': str(exc)})
 
     def key_up(self, event) -> None:
         self.pressed.discard(event.keysym.lower())
@@ -530,6 +556,16 @@ class Game:
         now = time.perf_counter()
         dt = min(.05, max(0.0, now - self.last_tick))
         self.last_tick = now
+        connection = self.connection
+        if connection:
+            for _ in range(100):
+                try:
+                    message = connection.events.get_nowait()
+                except queue.Empty:
+                    break
+                self.online_message(message)
+                if connection is not self.connection:
+                    break
         match = self.match
         if match and self.bot:
             self.bot.step(match, dt)
@@ -557,14 +593,6 @@ class Game:
         elif self.online_state is not None and self.connection:
             self.connection.ping()
             self.draw()
-        connection = self.connection
-        if connection:
-            for _ in range(100):
-                try:
-                    message = connection.events.get_nowait()
-                except queue.Empty:
-                    break
-                self.online_message(message)
         self.root.after(16, self.tick)
 
     def announce(self, message: str) -> None:
@@ -580,6 +608,15 @@ class Game:
         age = max(0.0, time.monotonic() - state.get('_received_at', time.monotonic()))
         return predict_ball(state['ball'], state['velocity'], min(.3, age + ping_ms / 1000))
 
+    def predicted_paddles(self) -> list[float]:
+        paddles = list(self.online_state['paddles'])
+        if (self.online_player is not None and
+                getattr(self.connection, 'supports_step_ack', False) is True and
+                'step_ack' in self.online_state):
+            player = self.online_player
+            paddles[player] = self.paddle_prediction.position(paddles[player], player)
+        return paddles
+
     def draw(self) -> None:
         if not self.match and self.online_state is None:
             return
@@ -594,7 +631,7 @@ class Game:
             return margin + (x + HALF_WIDTH) * xscale, height - margin - z * zscale
         c.create_rectangle(margin, margin, width - margin, height - margin, outline="#91b9c4", width=2)
         c.create_line(*point(-HALF_WIDTH, 10), *point(HALF_WIDTH, 10), fill="#52717a", dash=(8, 6))
-        paddles = self.match.paddles if self.match else self.online_state["paddles"]
+        paddles = self.match.paddles if self.match else self.predicted_paddles()
         ball_x, ball_z = ((self.match.ball_x, self.match.ball_z) if self.match
                           else self.online_ball())
         for player, z, color in ((0, .3, "#49dca1"), (1, 19.7, "#ffae70")):
