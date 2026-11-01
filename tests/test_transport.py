@@ -1,9 +1,8 @@
 """Transport freshness, compact state, and slow-client behavior."""
 import queue
-import io
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from dragonpong.client import Connection, LatestEventQueue, expand_frame, predict_ball
 from dragonpong.server import Client, Server, Room, compact_state
@@ -79,10 +78,10 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(inbox.get_nowait()['events'][0]['kind'], 'goal')
         self.assertEqual(inbox.get_nowait()['events'], [])
 
-    def test_ball_prediction_reflects_side_wall_and_stops_at_goal(self):
+    def test_ball_prediction_holds_at_speculative_goal(self):
         x, z = predict_ball([8, 1], [10, -10], .2)
-        self.assertAlmostEqual(x, 8)
-        self.assertEqual(z, 0)
+        self.assertAlmostEqual(x, 8.17, places=5)
+        self.assertAlmostEqual(z, .83, places=5)
 
     def test_slow_client_skips_old_state_and_replays_event(self):
         writer = FakeWriter()
@@ -104,25 +103,34 @@ class TransportTests(unittest.TestCase):
         self.assertFalse(writer.closed)
         self.assertIn(b'"kind":"goal"', writer.writes[0])
 
+    def test_final_goal_is_not_skipped_due_to_soft_backpressure(self):
+        writer = FakeWriter()
+        client = Client(writer, 'bir', player=0)
+        writer.transport.buffer_size = 10000
+        state = self.state([Event('goal', 0, 0), Event('win', 0, 0)])
+        state['winner'] = 0
+        state['scores'] = [10, 0]
+        client.send_state(state)
+        final = json.loads(writer.writes[0])
+        self.assertEqual(final['winner'], 0)
+        self.assertEqual([event['kind'] for event in final['events']], ['goal', 'win'])
+
     def test_client_negotiates_new_protocol_and_falls_back_to_old_server(self):
         for advertised, feature, expected in (([2, 3], True, 3),
                                               ([2, 3], False, 3),
                                               (None, False, 2)):
             with self.subTest(advertised=advertised, feature=feature):
-                sock = MagicMock()
                 room_list = {'type': 'rooms', 'rooms': []}
                 if advertised is not None:
                     room_list['protocols'] = advertised
                     room_list['features'] = ['step_ack'] if feature else []
-                sock.makefile.return_value = io.BytesIO((json.dumps(room_list) + '\n').encode())
-                with patch('dragonpong.client.socket.create_connection', return_value=sock):
+                with patch('dragonpong.client.threading.Thread.start'):
                     connection = Connection()
-                connection.thread.join(1)
+                connection._message(room_list)
                 connection.send('create', name='bir')
                 self.assertEqual(connection.protocol, expected)
                 self.assertEqual(connection.supports_step_ack, feature)
-                self.assertEqual(json.loads(sock.sendall.call_args.args[0])['protocol'], expected)
-                sock.setsockopt.assert_called_once()
+                self.assertEqual(json.loads(connection.outgoing.get_nowait()[0])['protocol'], expected)
                 connection.close()
 
 

@@ -6,5 +6,9 @@ if exist "%~dp0DragonPongClone.exe" (
   if errorlevel 1 pause
   exit /b
 )
-python run_offline.py
+if exist "%~dp0.venv\Scripts\python.exe" (
+  "%~dp0.venv\Scripts\python.exe" run_offline.py
+) else (
+  python run_offline.py
+)
 if errorlevel 1 pause

@@ -1,3 +1,4 @@
 numpy>=2.0,<3
 sounddevice>=0.5,<1
 pygame>=2.6,<3
+wxPython==4.3.2

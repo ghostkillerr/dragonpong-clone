@@ -1,0 +1,106 @@
+{
+  "date": "2026-11-01",
+  "automated_tests": {
+    "total": 163,
+    "passed": 161,
+    "skipped": 2,
+    "seconds": 11.178
+  },
+  "matrix": {
+    "cases": 2928,
+    "before_accepted": 1548,
+    "after_accepted": 1712,
+    "gained": 164,
+    "lost": 0,
+    "gained_by_profile": {
+      "mobile_160ms": 24,
+      "tcp_retransmit_180ms": 96,
+      "high_300ms": 44
+    },
+    "original_results": {
+      "hit": 758,
+      "stale_view": 984,
+      "compensated": 784,
+      "no_playable_view": 396,
+      "buffered_hit": 6
+    },
+    "current_results": {
+      "hit": 758,
+      "stale_view": 856,
+      "no_playable_view": 360,
+      "compensated": 948,
+      "buffered_hit": 6
+    }
+  },
+  "matrix_source_sha256": {
+    "dragonpong/engine.py": "a8f087babefa3dd344346b60a1f32da57171f2614a1b21e038b44d01e7c54de8",
+    "dragonpong/server.py": "ce6b1902aa73d8cc546969eb1d03e37f5fabc5cc46074c2809ba8c54b318359c",
+    "dragonpong/client.py": "f38d0a6a537d6a8a60d215a7b8569576b543bb442bb3aeafefdf1c66acc80896",
+    "dragonpong/netplay.py": "83e0244b3b15400c6234adcce2a76ceb4e76eca0921856787cdaccfd52571d56",
+    "dragonpong/native_ui.py": "0c3c88543fcaada7fc9707f9426396f2881e588a1b09a80fca051e0ac052740e",
+    "run_offline.py": "368cfdc3b7c81034415871e83021548fd171db37fa1f84abd3bd03edb60009d1",
+    "simulate_netplay.py": "bd282bddfe0a58875d48b1a46a942509a49e71a0c296a66a932d16b45e4bb21c"
+  },
+  "current_source_sha256": {
+    "dragonpong/engine.py": "a8f087babefa3dd344346b60a1f32da57171f2614a1b21e038b44d01e7c54de8",
+    "dragonpong/server.py": "ce6b1902aa73d8cc546969eb1d03e37f5fabc5cc46074c2809ba8c54b318359c",
+    "dragonpong/client.py": "f38d0a6a537d6a8a60d215a7b8569576b543bb442bb3aeafefdf1c66acc80896",
+    "dragonpong/netplay.py": "83e0244b3b15400c6234adcce2a76ceb4e76eca0921856787cdaccfd52571d56",
+    "dragonpong/native_ui.py": "09073f77c6392ba6085c071808c502a70464b1823ff521c76c7da70747a9dd6f",
+    "run_offline.py": "369580b9e5dc22c242b0998554f58353b1a4f90edb03cb6f0529c67b76c6ad2a",
+    "simulate_netplay.py": "bd282bddfe0a58875d48b1a46a942509a49e71a0c296a66a932d16b45e4bb21c"
+  },
+  "matrix_reuse": {
+    "rerun_this_continuation": false,
+    "unchanged_sources": [
+      "dragonpong/engine.py",
+      "dragonpong/server.py",
+      "dragonpong/client.py",
+      "dragonpong/netplay.py",
+      "simulate_netplay.py"
+    ],
+    "reason": "Only GUI focus/announcement code changed; existing matrix retained with original source hashes."
+  },
+  "local_packaged_check": {
+    "exe_sha256": "ecdc837159974c5d0375c2d07d3570e0a2e189dcda48919a4c8a75c8dcb1cbb6",
+    "bytes": 36861503,
+    "startup": {
+      "audio_error": "",
+      "assets": 0,
+      "score_target": 30,
+      "ball_moving": true,
+      "frozen": true,
+      "audio_callbacks": 56,
+      "callback_errors": []
+    },
+    "tcp_delay_ms": {
+      "upload": 90,
+      "download": 30
+    },
+    "checks": {
+      "tab_and_shift_tab": true,
+      "focus_preserved_between_windows": true,
+      "background_created_match_keyboard": true,
+      "both_late_contacts_compensated": true,
+      "score_remained_zero": true,
+      "stale_inputs_blocked": true,
+      "fresh_single_step_ack": true,
+      "stale_notice_cleared_on_reconnect": true,
+      "peer_close_reason": true,
+      "manual_reconnect": true,
+      "normal_process_exit": true
+    },
+    "scope": "Local loopback with staged contact and application-feed pause; not internet acceptance."
+  },
+  "manual_nvda_checks": [
+    "Character choice and confirmation button names/roles",
+    "F6 ping/jitter spoken output"
+  ],
+  "limitations": [
+    "Local loopback delay fixture; not internet acceptance.",
+    "Incoming contact fixture adds 100 ms native advance when a real EXE press arrives.",
+    "State silence pauses application state/frame feed while heartbeat continues; not a complete TCP outage.",
+    "User speech confirmation is limited to the stated controls/F6.",
+    "Original 143 WAV assets and native x86 comparison were not available/repeated."
+  ]
+}

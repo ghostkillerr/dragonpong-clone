@@ -6,6 +6,40 @@ from dragonpong.server import Server
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strike_reference_feature_is_opt_in(self):
+        from dragonpong.netplay import STRIKE_FEATURE
+        for protocol, features, expected in ((2, [STRIKE_FEATURE], False),
+                                               (3, [], False),
+                                               (3, [STRIKE_FEATURE], True)):
+            reader, writer = await self.connect()
+            await self.send(writer, 'create', name='test', protocol=protocol, features=features)
+            room_id = (await self.receive(reader))['room_id']
+            self.assertEqual(self.lobby.rooms[room_id].host.strike_refs, expected)
+
+    async def test_disconnect_during_goal_grace_closes_without_provisional_score(self):
+        from dragonpong.engine import Match, Rules, TICK
+        from dragonpong.netplay import STRIKE_FEATURE
+        host, hw = await self.connect()
+        guest, gw = await self.connect()
+        await self.send(hw, 'create', name='host', protocol=3, features=[STRIKE_FEATURE])
+        room_id = (await self.receive(host))['room_id']
+        await self.send(gw, 'join', name='guest', room_id=room_id)
+        await self.receive(guest)
+        room = self.lobby.rooms[room_id]
+        room.match = Match(Rules(score=1, shield=False, silent_ball=False))
+        room.characters = {0: 0, 1: 1}
+        room.match.ball_z, room.match.vz = .9, -80
+        room.started = True
+        self.lobby.step_match(room, TICK)
+        room.task = asyncio.create_task(self.lobby.run_match(room))
+        state = await self.receive_type(host, 'state')
+        self.assertTrue(state['pending_goal'])
+        gw.close()
+        await self.receive_type(host, 'room_closed')
+        self.assertEqual(room.match.scores, [0, 0])
+        self.assertIsNone(room.match.winner)
+        self.assertNotIn(room_id, self.lobby.rooms)
+
     async def test_spectator_receives_finished_match_immediately(self):
         from dragonpong.engine import Match, Rules
         host, hw = await self.connect()
