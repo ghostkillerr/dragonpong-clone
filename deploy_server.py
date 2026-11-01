@@ -35,18 +35,19 @@ def main() -> None:
     try:
         command(ssh, "mkdir -p /opt/dragonpong/clone-next/dragonpong")
         with ssh.open_sftp() as sftp:
-            for filename in ("__init__.py", "engine.py", "server.py"):
+            for filename in ("__init__.py", "engine.py", "netplay.py", "server.py"):
                 sftp.put(str(ROOT / "dragonpong" / filename),
                          f"/opt/dragonpong/clone-next/dragonpong/{filename}")
         command(ssh, "python3 -m py_compile /opt/dragonpong/clone-next/dragonpong/*.py")
+        command(ssh, "PYTHONPATH=/opt/dragonpong/clone-next python3 -c 'from dragonpong.server import Server; Server()'")
         command(ssh, """python3 - <<'PY'
 import json, socket, shutil, subprocess, time
 from pathlib import Path
 def rooms():
     with socket.create_connection(('127.0.0.1',8870),3) as sock:
         sock.sendall(b'{"type":"rooms"}\\n')
-        return json.loads(sock.makefile('rb').readline())['rooms']
-if rooms():
+        return json.loads(sock.makefile('rb').readline())
+if rooms()['rooms']:
     raise RuntimeError('Active rooms exist; deployment not applied')
 root=Path('/opt/dragonpong/clone/dragonpong')
 backup=Path('/opt/dragonpong/clone-backup-'+str(time.time_ns()))
@@ -59,7 +60,9 @@ try:
     subprocess.run(['systemctl','start','dragonpong-clone.service'],check=True)
     for attempt in range(30):
         try:
-            rooms()
+            listing = rooms()
+            if 'strike_ref_v1' not in listing.get('features', []):
+                raise RuntimeError('Strike reference feature is unavailable')
             break
         except OSError:
             time.sleep(.1)

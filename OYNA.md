@@ -25,27 +25,30 @@ müzik sesini ayarlar.
 
 Sunucu `ekransizoyuncular.gen.tr:8870` adresindedir. Oyun kaynakları ve
 MIT KEMAR veri atfı ayrı kaynak paketinde bulunur.
-Maç sırasında skorun yanında bağlantı gecikmesi görünür. Yeni istemci eski
+Maç sırasında bağlantı gecikmesi ve dalgalanma ayrı durum satırında görünür. Yeni istemci eski
 sunucuyla da bağlanır; güncel sunucuyla daha az veri kullanan protokolü seçer.
 
-Yerel geliştirme sürümünde ping ve dalgalanma çevrimiçi ekranın altında
+Bu sürümde ping ve dalgalanma çevrimiçi ekranın altında
 gösterilir. F6 ile mevcut bağlantı bilgisini erişilebilir durum bildirimi olarak dinle.
 Güncel protokolde veri 250 ms güncellenmezse veya saat bilgisi paketin kesin
 eskidiğini gösterirse gecikme uyarısı çıkar; komutlar yeni veri
 gelene kadar engellenir. Kopmada neden ana menüde görünür; yeniden bağlanmak
 için oyuncu/izleyici seçeneğini kullan. Kurulum: `README.md`.
 
-Yeni geliştirme istemcisi ve sunucusu birlikte kullanıldığında vuruş,
+Yeni istemci ve sunucu birlikte kullanıldığında vuruş,
 son duyduğun/gördüğün top karesine bağlanır. Kısa gecikmeler için gol
 kararı sınırlı süre bekler; vuruş reddedilirse nedeni bildirilir.
+Geçerli görünen vuruşta temas sesini kendi bilgisayarın hemen çalar;
+sunucu onayında aynı ses tekrar çalmaz. Skorun son kararını sunucu verir.
 Çok uzun donmalar bu toleransın dışındadır. `NETPLAY_DOGRULAMA.md`
 özelliğin koşullarını ve denenen senaryoları açıklar.
 
-Yerel deneme EXE'si `dist/DragonPongClone.exe` içindedir. Çevrimiçi yerel
-deneme için `README.md` içindeki sunucuyu başlat; EXE normalde
-`127.0.0.1:8870` adresine bağlanır. Özgün sesler bu derlemede yoktur.
+İlk kurulum ZIP'ini yeni bir klasöre çıkar ve `start_clone.bat` dosyasını aç.
+EXE'yi tek başına açarsan otomatik güncelleme denetlenmez. Kaynak koddan yerel
+deneme için `README.md` içindeki yönergeleri kullan.
+Özgün sesler bu indirme paketinde yoktur.
 
-Bu yerel referans paketi özgün sesleri içerir; sesler MIT lisansına dahil değildir.
+Ayrı tutulan yerel referans paketi özgün sesleri içerir; sesler MIT lisansına dahil değildir.
 `reference_sounds/SESLER.md` hangi WAV'ın ne işe yaradığını gösterir. Aynı yoldaki
 dosyayı değiştirip oyunu yeniden açabilirsin. Özgünlüğü doğrulanan ve eksik kalan
 bölümler `PARITY.md` dosyasındadır.
