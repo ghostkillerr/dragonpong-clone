@@ -17,7 +17,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.lobby.rooms[room_id].host.strike_refs, expected)
 
     async def test_disconnect_during_goal_grace_closes_without_provisional_score(self):
-        from dragonpong.engine import Match, Rules
+        from dragonpong.engine import Match, Rules, TICK
         from dragonpong.netplay import STRIKE_FEATURE
         host, hw = await self.connect()
         guest, gw = await self.connect()
@@ -30,6 +30,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         room.characters = {0: 0, 1: 1}
         room.match.ball_z, room.match.vz = .9, -80
         room.started = True
+        self.lobby.step_match(room, TICK)
         room.task = asyncio.create_task(self.lobby.run_match(room))
         state = await self.receive_type(host, 'state')
         self.assertTrue(state['pending_goal'])
