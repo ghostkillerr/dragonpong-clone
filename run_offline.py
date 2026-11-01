@@ -13,7 +13,7 @@ from dragonpong.audio import AudioOutput
 from dragonpong.client import Connection, PaddlePrediction
 from dragonpong.engine import Bot, COURT_LENGTH, Event, HALF_WIDTH, Match, Rules
 from dragonpong.controls import ControllerInput
-from dragonpong.netplay import MAX_CONTACT_LAG, present_flight, view_is_stale, view_seconds
+from dragonpong.netplay import MAX_CONTACT_LAG, local_hit_possible, present_flight, view_is_stale, view_seconds
 
 CHARACTERS = ['Lord owny', 'Uncle Sam', 'Evil Sammy', 'David The Eighth', 'Karakter 5']
 
@@ -64,6 +64,10 @@ class Game:
         self.paddle_prediction = PaddlePrediction()
         self.online_state: dict | None = None
         self.presented_view: dict | None = None
+        self.presented_contact = None
+        self.local_hit_flight: int | None = None
+        self.local_hit_at = 0.0
+        self.local_hit_press: int | None = None
         self.network_notice_active = False
         self.network_recovery_since = None
         self.online_player: int | None = None
@@ -198,6 +202,9 @@ class Game:
         self.match = None
         self.online_state = None
         self.presented_view = None
+        self.presented_contact = None
+        self.local_hit_flight = None
+        self.local_hit_press = None
         self.network_notice_active = False
         self.network_recovery_since = None
         self.online_player = None
@@ -505,9 +512,13 @@ class Game:
             else:
                 self.audio.listener_x = message["paddles"][self.audio.listener]
             self.refresh_online_audio()
+            suppress_paddle = (self.local_hit_flight is not None and
+                               message.get('flight_id') == self.local_hit_flight + 1 and
+                               time.monotonic() - self.local_hit_at <= .5)
             for item in message.get("events", []):
                 event = Event(**item)
-                if not self.audio_error:
+                if not self.audio_error and not (suppress_paddle and event.kind == 'paddle' and
+                                                 event.player == self.online_player):
                     self.audio.play(event)
                 if event.kind == "goal":
                     if message['winner'] is None:
@@ -516,6 +527,11 @@ class Game:
                 elif event.kind == "win":
                     self.audio.match_result(event.player, self.characters)
                     self.announce("Maç bitti.")
+            if self.local_hit_flight is not None and (
+                    message.get('flight_id') != self.local_hit_flight or
+                    time.monotonic() - self.local_hit_at > .5):
+                self.local_hit_flight = None
+                self.local_hit_press = None
         elif kind == 'strike_result':
             errors = {'not_ready': 'Servis sırası veya bekleme süresi uygun değil.',
                       'invalid_view': 'Güncel oyun verisi bekleniyor.',
@@ -526,6 +542,9 @@ class Game:
                       'out_of_reach': 'Top raketin yanında kaldı.',
                       'out_of_range': 'Top henüz vuruş alanında değil.'}
             if message.get('result') in errors:
+                if self.local_hit_press is None or message.get('press') == self.local_hit_press:
+                    self.local_hit_flight = None
+                    self.local_hit_press = None
                 self.announce('Vuruş olmadı: ' + errors[message['result']])
         elif kind == "perspective":
             self.audio.listener = message["player"]
@@ -579,11 +598,27 @@ class Game:
             elif (self.connection and self.online_player is not None and
                   self.online_state.get('winner') is None):
                 fields = {}
-                if getattr(self.connection, 'supports_strike_ref', False) is True:
+                modern = getattr(self.connection, 'supports_strike_ref', False) is True
+                if modern:
                     fields['view'] = self.presented_view or {
                         'frame': self.online_state.get('frame_id'),
                         'seconds': self.online_view_seconds(self.online_state)}
-                self.send_online("strike", **fields)
+                press = getattr(self.connection, 'next_press', None)
+                if self.send_online("strike", **fields) and modern and not self.audio_error:
+                    now = time.monotonic()
+                    contact = self.presented_contact
+                    flight_id = self.online_state.get('flight_id')
+                    if (flight_id != self.local_hit_flight and
+                            local_hit_possible(self.online_state, contact,
+                                               self.predicted_paddles()[self.online_player],
+                                               self.online_player, now)):
+                        self.local_hit_flight = flight_id
+                        self.local_hit_at = now
+                        self.local_hit_press = press if type(press) is int else None
+                        self.audio.play(Event('paddle', self.predicted_paddles()[self.online_player],
+                                              self.online_player * COURT_LENGTH,
+                                              player=self.online_player))
+                        self.audio.set_ball(None)
         elif key == "escape":
             self.menu()
         elif self.online_state is not None and self.online_player is None and key in ("left", "right"):
@@ -699,12 +734,17 @@ class Game:
     def refresh_online_audio(self) -> tuple[float, float]:
         state = self.online_state
         presentation = self.present_online(state)
+        self.presented_contact = presentation
         flight = presentation.flight
         self.presented_view = {'frame': presentation.source.get('frame_id'), 'seconds': presentation.seconds}
         if self.network_stalled():
             self.audio.set_ball(None)
             self.audio.set_shields([])
             return tuple(state['ball'])
+        if (self.local_hit_flight == state.get('flight_id') and
+                time.monotonic() - self.local_hit_at <= .5 and self.online_player is not None):
+            self.audio.set_ball(None)
+            return self.predicted_paddles()[self.online_player], self.online_player * COURT_LENGTH
         source = presentation.source
         self.audio.set_ball(Event('rolling', flight.x, flight.z)
                             if any(source['velocity']) and not source['silent'] else None)

@@ -177,3 +177,18 @@ def present_flight(state: dict, ping_ms, now: float, player=None, modern=True) -
                 seconds, projected = last
                 held = True
     return PresentedFlight(source, seconds, projected, held)
+
+
+def local_hit_possible(state: dict, presentation: PresentedFlight | None,
+                       paddle_x: float, player: int | None, now: float) -> bool:
+    """Gate immediate feedback to a contact the server can plausibly accept."""
+    if player not in (0, 1) or presentation is None or state.get('winner') is not None:
+        return False
+    source, flight = presentation.source, presentation.flight
+    if (type(state.get('flight_id')) is not int or
+            source.get('flight_id') != state.get('flight_id') or
+            source.get('pending_goal') or view_is_stale(source, now)):
+        return False
+    incoming = flight.vz < 0 if player == 0 else flight.vz > 0
+    depth = flight.z if player == 0 else COURT_LENGTH - flight.z
+    return incoming and 1 <= depth < 6 and abs(flight.x - paddle_x) < 3

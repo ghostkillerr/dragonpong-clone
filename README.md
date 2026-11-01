@@ -9,6 +9,10 @@ bu paket bulunmazsa kodla üretilen efektlere döner.
 
 Gecikmeli vuruş düzeltmesi ve ayrıntılı simülasyon sonuçları:
 [Çevrimiçi doğrulama](NETPLAY_DOGRULAMA.md).
+Vuruş sesinin yerel olarak anında verilmesi üzerinde çalışılıyor; geçerli
+görünen temas sesi sunucu yanıtı gelmeden bir kez çalar, skor sunucuda kalır.
+Doğrudan oyuncu bağlantısının aşamaları ve kabul ölçütleri:
+[doğrudan bağlantı planı](PEER_PLAY_PLAN.md).
 Yerel geliştirme arayüzü wxPython ile gerçek Windows denetimleri kullanır.
 NVDA ve paketli deneme kapsamı: [doğrulama kaydı](NETPLAY_DOGRULAMA.md).
 

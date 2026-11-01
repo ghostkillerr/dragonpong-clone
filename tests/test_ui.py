@@ -259,9 +259,101 @@ class UITests(unittest.TestCase):
             point = self.game.refresh_online_audio()
             self.game.key_down(SimpleNamespace(keysym='Up'))
         self.assertTrue(1 <= point[1] < 6)
-        self.assertEqual(self.game.audio.set_ball.call_args.args[0].z, point[1])
+        self.game.audio.set_ball.assert_called_with(None)
+        self.assertEqual(self.game.audio.play.call_args.args[0].kind, 'paddle')
         self.assertEqual(self.game.presented_view['frame'], 7)
         self.game.connection.send.assert_called_once_with('strike', view=self.game.presented_view)
+
+    def test_local_hit_feedback_for_both_players_does_not_repeat(self):
+        for player in (0, 1):
+            with self.subTest(player=player):
+                self.game.menu()
+                self.game.connection = MagicMock()
+                self.game.connection.supports_strike_ref = True
+                self.game.connection.ping_ms = 0
+                self.game.connection.next_press = 1
+                self.game.online_player = player
+                self.game.online_state = {
+                    'ball': [0, 3 if player == 0 else 17],
+                    'velocity': [0, -20 if player == 0 else 20],
+                    '_received_at': 100, 'frame_id': 7, 'flight_id': 3,
+                    'silent': False, 'paddles': [0, 0], 'shields': [],
+                    'pending_goal': False, 'scores': [0, 0], 'events': [],
+                }
+                self.game.audio.play.reset_mock()
+                with patch.object(run_offline.time, 'monotonic', return_value=100):
+                    self.game.refresh_online_audio()
+                    self.game.key_down(SimpleNamespace(keysym='Up'))
+                    self.game.key_down(SimpleNamespace(keysym='Up'))
+                self.assertEqual(self.game.audio.play.call_count, 1)
+                self.assertEqual(self.game.audio.play.call_args.args[0].player, player)
+                self.assertEqual(self.game.local_hit_flight, 3)
+
+    def test_local_hit_feedback_requires_reachable_incoming_ball(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 0
+        self.game.online_player = 0
+        self.game.online_state = {
+            'ball': [8, 3], 'velocity': [0, -20], '_received_at': 100,
+            'frame_id': 7, 'flight_id': 3, 'silent': False,
+            'paddles': [0, 0], 'shields': [], 'pending_goal': False,
+        }
+        with patch.object(run_offline.time, 'monotonic', return_value=100):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.game.connection.send.assert_called_once()
+        self.game.audio.play.assert_not_called()
+
+    def test_confirmed_local_hit_sound_is_not_played_again(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.supports_step_ack = False
+        self.game.connection.ping_ms = 0
+        self.game.connection.next_press = 1
+        self.game.online_player = 0
+        self.game.online_state = {
+            'ball': [0, 3], 'velocity': [0, -20], '_received_at': 100,
+            'frame_id': 7, 'flight_id': 3, 'silent': False,
+            'paddles': [0, 0], 'shields': [], 'pending_goal': False,
+            'scores': [0, 0], 'events': [], 'winner': None,
+        }
+        self.game.online_game_screen()
+        with patch.object(run_offline.time, 'monotonic', return_value=100):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.assertEqual(self.game.audio.play.call_count, 1)
+        confirmed = {**self.game.online_state, 'type': 'state', 'ball': [0, 0],
+                     'velocity': [0, 20], '_received_at': 100.05,
+                     'frame_id': 8, 'flight_id': 4,
+                     'events': [{'kind': 'paddle', 'x': 0, 'z': 0, 'player': 0}]}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.05):
+            self.game.online_message(confirmed)
+        self.assertEqual(self.game.audio.play.call_count, 1)
+        self.assertIsNone(self.game.local_hit_flight)
+
+    def test_rejected_local_hit_releases_pending_feedback(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 0
+        self.game.connection.next_press = 1
+        self.game.online_player = 0
+        self.game.online_state = {
+            'ball': [0, 3], 'velocity': [0, -20], '_received_at': 100,
+            'frame_id': 7, 'flight_id': 3, 'silent': False,
+            'paddles': [0, 0], 'shields': [], 'pending_goal': False,
+        }
+        self.game.online_game_screen()
+        with patch.object(run_offline.time, 'monotonic', return_value=100):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+            self.game.online_message({'type': 'strike_result', 'press': 2,
+                                      'result': 'too_late'})
+        self.assertEqual(self.game.local_hit_flight, 3)
+        with patch.object(run_offline.time, 'monotonic', return_value=100.01):
+            self.game.online_message({'type': 'strike_result', 'press': 1,
+                                      'result': 'too_late'})
+        self.assertIsNone(self.game.local_hit_flight)
 
     def test_fresh_state_recovers_after_stale_input_was_discarded(self):
         self.game.connection = MagicMock()
