@@ -5,25 +5,34 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import secrets
 import time
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any
 
 from .engine import COURT_LENGTH, Match, Rules, TICK
+from .netplay import STRIKE_FEATURE, MAX_CONTACT_LAG, MAX_PREDICTION, MAX_VIEW_AGE, predict_view
 
 MAX_LINE = 4096
 STRIKE_BUFFER_SECONDS = .25
 MAX_STATE_BACKLOG = 8192
 MAX_PENDING_EVENTS = 20
 SLOW_CLIENT_SECONDS = 3
+CONTROL_SEND_TIMEOUT = 1.0
 
 
 def compact_state(state: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "frame", "b": state["ball"], "v": state["velocity"],
+    frame = {"type": "frame", "b": state["ball"], "v": state["velocity"],
             "p": state["paddles"], "s": state["scores"], "sr": state["serving"],
             "w": state["winner"], "si": state["silent"], "sh": state["shields"],
             "r": state["ready"], "e": state["events"], "a": state["step_ack"]}
+    for short, long in {'n': 'frame_id', 'f': 'flight_id', 't': 'sim_time',
+                        'q': 'phase', 'h': 'shield_left', 'g': 'pending_goal', 'c': 'server_time'}.items():
+        if long in state:
+            frame[short] = state[long]
+    return frame
 
 
 @dataclass(eq=False)
@@ -39,10 +48,28 @@ class Client:
     pending_events: list[dict[str, Any]] = field(default_factory=list)
     slow_since: float | None = None
     last_step_seq: int = 0
+    strike_refs: bool = False
+    last_press: int = 0
+    views: deque = field(default_factory=lambda: deque(maxlen=64))
+
+    def remember_view(self, state: dict) -> None:
+        if self.strike_refs and 'frame_id' in state:
+            self.views.append((time.monotonic(), {key: list(value) if isinstance(value, list) else value
+                               for key, value in state.items() if key != 'events'}))
 
     async def send(self, message: dict[str, Any]) -> None:
         self.writer.write((json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n").encode())
-        await self.writer.drain()
+        await self.flush()
+
+    async def flush(self) -> None:
+        try:
+            await asyncio.wait_for(self.writer.drain(), CONTROL_SEND_TIMEOUT)
+        except TimeoutError:
+            self.writer.transport.abort()
+            raise
+        except OSError:
+            self.writer.close()
+            raise
 
     def send_state(self, state: dict[str, Any], *, emit: bool = True) -> None:
         self.pending_events.extend(state["events"])
@@ -62,7 +89,7 @@ class Client:
         if not emit:
             return
         now = time.monotonic()
-        if self.writer.transport.get_write_buffer_size() > MAX_STATE_BACKLOG:
+        if self.writer.transport.get_write_buffer_size() > MAX_STATE_BACKLOG and state['winner'] is None:
             if self.slow_since is None:
                 self.slow_since = now
             elif now - self.slow_since > SLOW_CLIENT_SECONDS:
@@ -73,6 +100,7 @@ class Client:
         if self.protocol == 3 and self.state_sent:
             payload = compact_state(payload)
         self.writer.write((json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode())
+        self.remember_view(state)
         self.pending_events = []
         self.state_sent = True
 
@@ -89,6 +117,12 @@ class Room:
     started: bool = False
     pending_strikes: dict[int, float] = field(default_factory=dict)
     frame_index: int = 0
+    snapshot_seq: int = 0
+    flight_id: int = 0
+    pending_goal_until: float | None = None
+    strike_stats: Counter = field(default_factory=Counter)
+    last_update_at: float | None = None
+    pending_events: list = field(default_factory=list)
 
     @property
     def clients(self) -> list[Client]:
@@ -107,11 +141,12 @@ class Server:
                 for room in self.rooms.values()]
 
     async def broadcast(self, room: Room, message: dict[str, Any]) -> None:
-        for client in room.clients:
+        async def deliver(client: Client) -> None:
             try:
                 await client.send(message)
             except (ConnectionError, OSError):
                 pass
+        await asyncio.gather(*(deliver(client) for client in room.clients))
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         client = Client(writer, "")
@@ -142,11 +177,11 @@ class Server:
             nonce = message.get("nonce")
             if type(nonce) is not int or not 0 <= nonce < 2**63:
                 raise ValueError("invalid ping")
-            await client.send({"type": "pong", "nonce": nonce})
+            await client.send({"type": "pong", "nonce": nonce, 'server_time': time.monotonic()})
             return
         if kind == "rooms":
             await client.send({"type": "rooms", "rooms": self.room_list(),
-                               "protocols": [2, 3], "features": ["step_ack"]})
+                               "protocols": [2, 3], "features": ["step_ack", STRIKE_FEATURE]})
             return
         if kind in ("create", "join", "spectate"):
             if type(message.get('protocol')) is not int or message['protocol'] not in (2, 3):
@@ -159,6 +194,8 @@ class Server:
                 raise ValueError("invalid name")
             client.name = name.strip()
             client.protocol = message["protocol"]
+            features = message.get('features', [])
+            client.strike_refs = (client.protocol == 3 and isinstance(features, list) and STRIKE_FEATURE in features)
             if kind == "create":
                 if len(self.rooms) >= 128:
                     await client.send({"type": "rejected", "reason": "room capacity"})
@@ -198,6 +235,8 @@ class Server:
         room = self.rooms.get(client.room_id)
         if not room:
             raise ValueError("room closed")
+        if kind in ('step', 'strike', 'serve') and room.match and room.started and room.last_update_at is not None:
+            room.pending_events.extend(self.advance_to_now(room))
         if kind == "character" and client.player is not None:
             if room.started or room.match is not None:
                 return
@@ -223,47 +262,132 @@ class Server:
         elif kind == "start" and client is room.host and room.match and not room.started:
             room.started = True
             await self.broadcast(room, {"type": "started"})
+            room.last_update_at = time.monotonic()
             room.task = asyncio.create_task(self.run_match(room))
         elif kind == "step" and client.player is not None and room.match and room.started:
-            value = message.get("direction")
-            if type(value) is not int or value not in (-1, 1):
-                raise ValueError("invalid movement")
-            if "seq" in message:
-                seq = message["seq"]
-                if type(seq) is not int or not 1 <= seq <= 2_147_483_647:
-                    raise ValueError("invalid movement sequence")
-                if seq <= client.last_step_seq:
-                    return
-                if seq != client.last_step_seq + 1:
-                    raise ValueError("out-of-order movement sequence")
-            room.match.move_step(client.player, value * (1 if client.player == 0 else -1))
-            if "seq" in message:
-                client.last_step_seq = seq
+            self.move_step(room, client, message)
         elif kind in ("serve", "strike") and client.player is not None and room.match and room.started:
-            match = room.match
-            player = client.player
-            if match.strike(player):
-                room.pending_strikes.pop(player, None)
-            elif ((match.vz < 0 if player == 0 else match.vz > 0) and
-                  (match.ball_z if player == 0 else COURT_LENGTH - match.ball_z) >= 6):
-                # A press just before the hit zone should survive one network/frame delay.
-                room.pending_strikes[player] = match.time + STRIKE_BUFFER_SECONDS
+            if client.strike_refs:
+                press = message.get('press')
+                if type(press) is not int or not 1 <= press <= 2_147_483_647:
+                    raise ValueError('invalid strike sequence')
+                if press <= client.last_press:
+                    return
+                if press != client.last_press + 1:
+                    raise ValueError('out-of-order strike sequence')
+                client.last_press = press
+                result = self.referenced_strike(room, client, message.get('view'))
+                room.strike_stats[result] += 1
+                await client.send({'type': 'strike_result', 'press': press, 'result': result})
+            else:
+                self.legacy_strike(room, client.player)
         elif kind == "perspective" and client in room.spectators:
             player = message.get("player")
             if player in (0, 1) and (player == 0 or room.guest is not None):
                 client.perspective = player
                 await client.send({"type": "perspective", "player": player})
 
+    def new_flight(self, room: Room) -> None:
+        room.flight_id += 1
+        room.pending_goal_until = None
+        room.pending_strikes.clear()
+
+    def move_step(self, room: Room, client: Client, message: dict) -> None:
+        value = message.get('direction')
+        if type(value) is not int or value not in (-1, 1):
+            raise ValueError('invalid movement')
+        if 'seq' in message:
+            seq = message['seq']
+            if type(seq) is not int or not 1 <= seq <= 2_147_483_647:
+                raise ValueError('invalid movement sequence')
+            if seq <= client.last_step_seq:
+                return
+            if seq != client.last_step_seq + 1:
+                raise ValueError('out-of-order movement sequence')
+        room.match.move_step(client.player, value * (1 if client.player == 0 else -1))
+        if 'seq' in message:
+            client.last_step_seq = seq
+
+    def native_strike(self, room: Room, player: int) -> bool:
+        if room.match.strike(player):
+            self.new_flight(room)
+            return True
+        return False
+
+    def legacy_strike(self, room: Room, player: int) -> None:
+        match = room.match
+        if self.native_strike(room, player):
+            return
+        if ((match.vz < 0 if player == 0 else match.vz > 0) and
+                (match.ball_z if player == 0 else COURT_LENGTH - match.ball_z) >= 6):
+            room.pending_strikes[player] = match.time + STRIKE_BUFFER_SECONDS
+
+    def referenced_strike(self, room: Room, client: Client, reference) -> str:
+        match, player = room.match, client.player
+        if match.winner is not None:
+            return 'finished'
+        if not isinstance(reference, dict):
+            return 'invalid_view'
+        frame, seconds = reference.get('frame'), reference.get('seconds')
+        if (type(frame) is not int or type(seconds) not in (int, float) or
+                not math.isfinite(seconds) or not 0 <= seconds <= MAX_PREDICTION):
+            return 'invalid_view'
+        found = next(((sent_at, state) for sent_at, state in reversed(client.views)
+                      if state['frame_id'] == frame), None)
+        if found is None:
+            return 'unknown_view'
+        sent_at, state = found
+        lag = match.time - state['sim_time'] - seconds
+        if (state['flight_id'] != room.flight_id or state['pending_goal'] or
+                time.monotonic() - sent_at > MAX_VIEW_AGE or
+                match.time - state['sim_time'] > MAX_VIEW_AGE or
+                lag > MAX_CONTACT_LAG + 1e-9 or lag < -MAX_PREDICTION - 1e-9):
+            return 'stale_view'
+        if not match.vz and room.pending_goal_until is None:
+            if any(state['velocity']):
+                return 'stale_view'
+            return 'serve' if self.native_strike(room, player) else 'not_ready'
+        flight = predict_view(state, seconds)
+        if not (flight.vz < 0 if player == 0 else flight.vz > 0):
+            return 'wrong_direction'
+        depth = flight.z if player == 0 else COURT_LENGTH - flight.z
+        if depth < 1:
+            return 'too_late'
+        if abs(flight.x - match.paddles[player]) >= 3:
+            return 'out_of_reach'
+        if lag < -TICK:
+            # A stale high RTT estimate can put the view ahead of the server.
+            # Keep the intent briefly; only the normal native hit window may fire.
+            incoming = match.vz < 0 if player == 0 else match.vz > 0
+            if incoming and room.pending_goal_until is None:
+                room.pending_strikes[player] = match.time + min(STRIKE_BUFFER_SECONDS, -lag + TICK)
+                return 'buffered'
+            return 'wrong_direction'
+        if depth >= 6:
+            current_depth = match.ball_z if player == 0 else COURT_LENGTH - match.ball_z
+            incoming = match.vz < 0 if player == 0 else match.vz > 0
+            if incoming and current_depth >= 6 and room.pending_goal_until is None:
+                room.pending_strikes[player] = match.time + STRIKE_BUFFER_SECONDS
+                return 'buffered'
+            return 'out_of_range'
+        compensated = room.pending_goal_until is not None or not match.can_strike(player)
+        saved = match.ball_x, match.ball_z, match.vx, match.vz
+        match.ball_x, match.ball_z, match.vx, match.vz = flight.x, flight.z, flight.vx, flight.vz
+        if self.native_strike(room, player):
+            return 'compensated' if compensated else 'hit'
+        match.ball_x, match.ball_z, match.vx, match.vz = saved
+        return 'out_of_range'
+
     async def run_match(self, room: Room) -> None:
         assert room.match and room.guest
         match = room.match
-        previous = time.monotonic()
+        if room.last_update_at is None:
+            room.last_update_at = time.monotonic()
         try:
             while room.room_id in self.rooms and room.started:
                 now = time.monotonic()
-                dt = min(.05, now - previous)
-                previous = now
-                events = self.step_match(room, dt)
+                events, room.pending_events = room.pending_events, []
+                events.extend(self.advance_to_now(room, now))
                 state = self.snapshot(room, events)
                 room.frame_index += 1
                 for client in room.clients:
@@ -274,25 +398,54 @@ class Server:
                     except (ConnectionError, OSError):
                         client.writer.close()
                 if match.winner is not None:
+                    async def finish(client: Client) -> None:
+                        try:
+                            await client.flush()
+                        except OSError:
+                            pass
+                    await asyncio.gather(*(finish(client) for client in room.clients))
                     room.started = False
                     break
                 await asyncio.sleep(max(0.0, 1 / 60 - (time.monotonic() - now)))
         except asyncio.CancelledError:
             raise
 
+    def advance_to_now(self, room: Room, now: float | None = None) -> list:
+        now = time.monotonic() if now is None else now
+        previous = room.last_update_at
+        room.last_update_at = now
+        return self.step_match(room, min(.25, max(0, now - previous)) if previous is not None else 0)
+
     def step_match(self, room: Room, dt: float) -> list:
         match = room.match
         assert match
+        if not math.isfinite(dt) or not 0 <= dt <= .25:
+            raise ValueError('invalid time step')
         self.apply_pending_strikes(room)
-        if not room.pending_strikes:
-            return match.step(dt)
-        # Check between physics ticks so a fast ball cannot cross the entire
-        # hit zone during one delayed server frame.
         events = []
         remaining = dt
-        while remaining > 0:
-            portion = min(TICK, remaining)
-            events.extend(match.step(portion))
+        while remaining > 1e-12:
+            portion = min(max(1e-12, TICK - match._accumulator), remaining)
+            player = 0 if match.vz < 0 else 1
+            defender = room.host if player == 0 else room.guest
+            depth = match.ball_z if player == 0 else COURT_LENGTH - match.ball_z
+            goal_due = (match.vz and match.winner is None and depth < 1 and
+                        not (match.rules.shield and match.shield_until[player] >= match.time + TICK))
+            if goal_due and defender is not None and defender.strike_refs:
+                if room.pending_goal_until is None:
+                    room.pending_goal_until = match.time + MAX_CONTACT_LAG
+                hold = match.time + TICK < room.pending_goal_until - 1e-9
+            else:
+                hold = False
+            velocity = match.vx, match.vz
+            if hold:
+                match.vx = match.vz = 0
+            chunk = match.step(portion)
+            if hold:
+                match.vx, match.vz = velocity
+            events.extend(chunk)
+            if any(event.kind in ('goal', 'shield_hit') for event in chunk):
+                self.new_flight(room)
             self.apply_pending_strikes(room)
             remaining -= portion
         events.extend(match.step(0))
@@ -302,24 +455,34 @@ class Server:
         match = room.match
         assert match
         for player, expiry in list(room.pending_strikes.items()):
+            if player not in room.pending_strikes:
+                continue
             incoming = match.vz < 0 if player == 0 else match.vz > 0
             if match.time > expiry or not incoming:
                 room.pending_strikes.pop(player, None)
-            elif match.can_strike(player):
-                match.strike(player)
-                room.pending_strikes.pop(player, None)
+            elif (room.pending_goal_until is None and
+                  (match.ball_z if player == 0 else COURT_LENGTH - match.ball_z) >= 1 and
+                  match.can_strike(player)):
+                self.native_strike(room, player)
 
     def snapshot(self, room: Room, events=()) -> dict:
         match = room.match
         assert match and room.guest
+        room.snapshot_seq += 1
         return {"type": "state", "ball": [match.ball_x, match.ball_z],
-                         "velocity": [match.vx, match.vz], "paddles": match.paddles,
-                         "scores": match.scores, "serving": match.serving,
+                         "velocity": [0, 0] if room.pending_goal_until is not None else [match.vx, match.vz],
+                         "paddles": list(match.paddles),
+                         "scores": list(match.scores), "serving": match.serving,
                          "winner": match.winner, "silent": match.time < match.silent_until,
                          "shields": [match.time < expiry for expiry in match.shield_until],
                          "players": [room.host.name, room.guest.name],
                          "characters": [room.characters[0], room.characters[1]],
                          "step_ack": [room.host.last_step_seq, room.guest.last_step_seq],
+                         "frame_id": room.snapshot_seq, "flight_id": room.flight_id,
+                         "sim_time": match.time, "phase": match._accumulator,
+                         "server_time": time.monotonic(),
+                         "shield_left": [max(0, expiry - match.time) for expiry in match.shield_until],
+                         "pending_goal": room.pending_goal_until is not None,
                          "ready": match.time >= match.ready_at,
                          "events": [event.__dict__ for event in events]}
 

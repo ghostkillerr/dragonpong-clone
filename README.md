@@ -7,6 +7,11 @@ bu paket bulunmazsa kodla üretilen efektlere döner.
 
 ## Çalıştırma
 
+Gecikmeli vuruş düzeltmesi ve ayrıntılı simülasyon sonuçları:
+[Çevrimiçi doğrulama](NETPLAY_DOGRULAMA.md).
+Yerel geliştirme arayüzü wxPython ile gerçek Windows denetimleri kullanır.
+NVDA ve paketli deneme kapsamı: [doğrulama kaydı](NETPLAY_DOGRULAMA.md).
+
 Windows'ta Python 3.12 veya üstüyle:
 
 ```powershell
@@ -96,3 +101,8 @@ yeniden başlatabilirsin. 143 özgün dosya yerel pakettedir, MIT kaynak ZIP'ine
 Yeni ses kökü için `DRAGONPONG_SOUND_DIR` ortam değişkenini kullanabilirsin.
 
 Test: `python -m unittest discover -s tests -v`.
+
+Yerel geliştirme sürümünde bağlantı kurma ve gönderme arka planda çalışır.
+Çevrimiçi ekranlarda ping ve dalgalanma gösterilir; F6 bağlantı bilgisini
+erişilebilir durum bildirimi olarak sunar. Geciken oyun verisi ve bağlantı hataları
+ayrıca gösterilir. Ayrıntılar ve canlı doğrulama sınırları [doğrulama kaydındadır](NETPLAY_DOGRULAMA.md).

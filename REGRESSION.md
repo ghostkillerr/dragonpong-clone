@@ -1,5 +1,25 @@
 # Modül regresyon kaydı
 
+## 1 Kasım 2026 — çevrimiçi temas ve yerel Windows denetimleri
+
+`engine.py` değiştirilmeden kareye bağlı vuruş, 250 ms gol/temas toleransı,
+motorla aynı uçuş tahmini, eski veri koruması ve sınırlı TCP gönderimi eklendi.
+Tkinter yerine wxPython denetimleri, erişilebilir bildirimler, Tab/Shift+Tab,
+pencereye dönüşte odak ve ekranlar arasında bildirim temizliği uygulandı.
+
+163 test: 161 başarılı, özgün sesler bulunmadığı için 2 atlandı. İki sunumda
+2.928'er senaryo: 1.548 → 1.712 kabul, 164 ek kabul, önceki kabullerden kayıp 0.
+Son GUI düzenlemeleri sırasında matrisin ağ/motor kaynakları değişmedi;
+arayüzün son hâli toplu test ve paketli GUI ile doğrulandı.
+
+Aynı yerel EXE ile iki oyuncuda hazırlanmış geç temas, eski giriş engeli,
+toparlanma, tek hareket onayı, Tab odağı, oda kapanışı ve elle yeniden bağlantı
+kontrolleri geçti. NVDA ile karakter seçimi/onay denetimleri ve F6 konuşması
+elle doğrulandı. Gerçek internet, farklı PC ve bütün NVDA kabulü açık.
+Yöntem ve tekrar komutları NETPLAY_DOGRULAMA.md; makinece okunabilir özet
+netplay_validation_summary.json içinde. EXE ve ham test/profil kayıtları eklenmedi.
+
+
 ## V7 özellik denetimi — v2.2, 29 Ekim 2026
 
 Değişen modüller: run_offline (odak, tuşlar, kalıcı profil, fare), controls (yeni

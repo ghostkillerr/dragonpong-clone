@@ -1,4 +1,4 @@
-"""Real Tk widgets with audio mocked; never touches the real saved profile."""
+"""Real native Windows widgets; audio mocked and profile isolated."""
 import json
 import queue
 import tempfile
@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 import run_offline
+from dragonpong.netplay import ContactFrames
 
 
 class UITests(unittest.TestCase):
@@ -63,6 +64,84 @@ class UITests(unittest.TestCase):
         self.assertIsNone(self.game.match)
         self.assertEqual(self.game.name.get(), 'ghostkiller')
 
+    def test_close_during_controller_poll_does_not_touch_destroyed_controls(self):
+        self.start_offline()
+        def close_while_polling(active):
+            self.game.close()
+            return []
+        self.game.controller.poll.side_effect = close_while_polling
+        self.game.tick()
+        self.assertFalse(self.game.canvas.winfo_exists())
+        self.game.close()  # Repeated close is safe as well.
+
+    def test_return_to_background_created_match_restores_keyboard_focus(self):
+        self.start_offline()
+        root = self.game.root
+        with patch.object(root.native, 'IsActive', return_value=True), \
+                patch.object(run_offline.ui.wx.Window, 'FindFocus', return_value=root.native), \
+                patch.object(self.game.canvas, 'focus_set') as focus:
+            root._restore_focus()
+        focus.assert_called_once()
+
+    def test_activation_preserves_native_control_focus_and_ignores_background(self):
+        root = self.game.root
+        with patch.object(root.native, 'IsActive', return_value=True), \
+                patch.object(run_offline.ui.wx.Window, 'FindFocus', return_value=self.game.name.native), \
+                patch.object(self.game.name, 'focus_set') as focus:
+            root._restore_focus()
+        focus.assert_not_called()
+        with patch.object(root.native, 'IsActive', return_value=False), \
+                patch.object(self.game.name, 'focus_set') as focus:
+            root._restore_focus()
+        focus.assert_not_called()
+
+    def test_frame_focus_does_not_drop_gameplay_keys(self):
+        self.start_offline()
+        event = SimpleNamespace(GetKeyCode=lambda: run_offline.ui.wx.WXK_RIGHT, Skip=MagicMock())
+        with patch.object(run_offline.ui.wx.Window, 'FindFocus', return_value=self.game.root.native):
+            self.game.root._on_key(event)
+        self.assertEqual(self.game.match.paddles[0], 1)
+
+    def test_game_canvas_tab_navigates_without_a_game_command(self):
+        self.start_offline()
+        for backward in (False, True):
+            event = SimpleNamespace(GetKeyCode=lambda: run_offline.ui.wx.WXK_TAB,
+                                    ShiftDown=lambda: backward, Skip=MagicMock())
+            with patch.object(run_offline.ui.wx.Window, 'FindFocus', return_value=self.game.canvas.native), \
+                    patch.object(self.game.canvas.native, 'Navigate', return_value=True) as navigate, \
+                    patch.dict(self.game.root.callbacks, {'<KeyPress>': MagicMock()}) as callbacks:
+                self.game.root._on_key(event)
+                navigate.assert_called_once()
+                self.assertEqual(navigate.call_args.args[0],
+                                 run_offline.ui.wx.NavigationKeyEvent.IsBackward if backward else
+                                 run_offline.ui.wx.NavigationKeyEvent.IsForward)
+                callbacks['<KeyPress>'].assert_not_called()
+
+    def test_container_focus_is_replaced_by_the_current_game_canvas(self):
+        self.start_offline()
+        with patch.object(self.game.root.native, 'IsActive', return_value=True), \
+                patch.object(run_offline.ui.wx.Window, 'FindFocus', return_value=self.game.container.native), \
+                patch.object(self.game.canvas, 'focus_set') as focus:
+            self.game.root._restore_focus()
+        focus.assert_called_once()
+
+    def test_native_tab_focus_is_remembered_for_window_reactivation(self):
+        self.start_offline()
+        button, = [w for w in self.game.container.children if w.kind == 'Button']
+        event = run_offline.ui.wx.FocusEvent(run_offline.ui.wx.wxEVT_SET_FOCUS)
+        button.native.GetEventHandler().ProcessEvent(event)
+        self.assertIs(self.game.root.desired_focus, button)
+        # A container can temporarily receive focus while screens change.
+        self.game.container.native.GetEventHandler().ProcessEvent(
+            run_offline.ui.wx.FocusEvent(run_offline.ui.wx.wxEVT_SET_FOCUS))
+        self.assertIs(self.game.root.desired_focus, button)
+
+    def test_new_screen_does_not_keep_previous_connection_notice(self):
+        self.game.title_message('Previous connection closed')
+        self.game.offline_character_menu()
+        self.assertEqual(self.game.root.last_announcement, '')
+        self.assertEqual(self.game.root.notice.GetLabel(), '')
+
     def test_spectator_arrows_only_change_perspective(self):
         self.game.connection = MagicMock()
         self.game.online_state = {'players': ['bir', 'iki']}
@@ -76,8 +155,192 @@ class UITests(unittest.TestCase):
         state = {'ball': [0, 10], 'velocity': [10, -10], '_received_at': 100}
         with patch.object(run_offline.time, 'monotonic', return_value=100.05):
             x, z = self.game.online_ball(state)
-        self.assertAlmostEqual(x, 1.5)
-        self.assertAlmostEqual(z, 8.5)
+        baseline = run_offline.Match()
+        baseline.ball_z, baseline.vx, baseline.vz = 10, 10, -10
+        baseline.step(.15)
+        self.assertEqual((x, z), (baseline.ball_x, baseline.ball_z))
+
+    def test_modern_ball_uses_half_rtt_and_native_tick_phase(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 100
+        state = {'ball': [0, 10], 'velocity': [10, -10], '_received_at': 100, 'phase': .01}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.05):
+            actual = self.game.online_ball(state)
+        baseline = run_offline.Match()
+        baseline.ball_z, baseline.vx, baseline.vz, baseline._accumulator = 10, 10, -10, .01
+        baseline.step(.1)
+        self.assertEqual(actual, (baseline.ball_x, baseline.ball_z))
+
+    def test_strike_references_exact_last_audio_view(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 100
+        self.game.online_player = 0
+        self.game.online_state = {'ball': [0, 5], 'velocity': [2, -10], '_received_at': 100,
+                                 'frame_id': 7, 'silent': False, 'paddles': [0, 0], 'shields': []}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.02):
+            point = self.game.refresh_online_audio()
+        reference = dict(self.game.presented_view)
+        rolling = self.game.audio.set_ball.call_args.args[0]
+        self.assertEqual((rolling.x, rolling.z), point)
+        with patch.object(run_offline.time, 'monotonic', return_value=100.03):
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.game.connection.send.assert_called_once_with('strike', view=reference)
+
+    def test_audio_moves_between_network_packets(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 0
+        self.game.online_state = {'ball': [0, 10], 'velocity': [2, -10], '_received_at': 100,
+                                 'frame_id': 7, 'silent': False, 'paddles': [0, 0], 'shields': []}
+        with patch.object(run_offline.time, 'monotonic', return_value=100):
+            start = self.game.refresh_online_audio()
+        with patch.object(run_offline.time, 'monotonic', return_value=100.05):
+            end = self.game.refresh_online_audio()
+        self.assertLess(end[1], start[1])
+        self.assertGreater(end[0], start[0])
+
+    def test_fast_ball_at_high_ping_does_not_skip_last_contact_position(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 300
+        self.game.online_player = 0
+        self.game.online_state = {'ball': [0, 18], 'velocity': [0, -120], '_received_at': 100,
+                                 'phase': .003, 'sim_time': 0, 'frame_id': 7, 'flight_id': 3,
+                                 'silent': False, 'paddles': [0, 0], 'shields': [], 'pending_goal': False}
+        with patch.object(run_offline.time, 'monotonic', return_value=100):
+            point = self.game.refresh_online_audio()
+        self.assertGreaterEqual(point[1], 1)
+        self.assertLess(point[1], 6)
+        self.assertLess(self.game.presented_view['seconds'], .15)
+
+    def test_modern_stale_state_stops_audio_and_input_before_one_second(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 0
+        self.game.online_player = 0
+        self.game.online_state = {'ball': [0, 10], 'velocity': [0, -40], '_received_at': 100,
+                                 'frame_id': 7, 'silent': False, 'paddles': [0, 0], 'shields': []}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.3):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.game.audio.set_ball.assert_called_with(None)
+        self.game.connection.send.assert_not_called()
+
+    def test_late_packet_arrival_does_not_restart_old_contact_audio(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 80
+        self.game.online_player = 0
+        self.game.online_state = {'ball': [0, 3], 'velocity': [0, -80], '_received_at': 100.3,
+                                 'server_time': 500, '_server_now_floor': 500.35,
+                                 'frame_id': 7, 'silent': False, 'paddles': [0, 0], 'shields': []}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.3):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.game.audio.set_ball.assert_called_with(None)
+        self.game.connection.send.assert_not_called()
+
+    def test_pending_packet_plays_and_references_retained_contact(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 80
+        self.game.online_player = 0
+        frames = ContactFrames()
+        source = {'ball': [0, 3], 'velocity': [0, -80], '_received_at': 100,
+                  'frame_id': 7, 'flight_id': 3, 'sim_time': 0, 'pending_goal': False,
+                  'silent': False, 'paddles': [0, 0], 'shields': []}
+        frames.receive(source)
+        self.game.online_state = frames.receive({**source, 'ball': [0, .28], 'velocity': [0, 0],
+                                                'frame_id': 8, 'sim_time': .051,
+                                                '_received_at': 100.05, 'pending_goal': True})
+        with patch.object(run_offline.time, 'monotonic', return_value=100.05):
+            point = self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.assertTrue(1 <= point[1] < 6)
+        self.assertEqual(self.game.audio.set_ball.call_args.args[0].z, point[1])
+        self.assertEqual(self.game.presented_view['frame'], 7)
+        self.game.connection.send.assert_called_once_with('strike', view=self.game.presented_view)
+
+    def test_fresh_state_recovers_after_stale_input_was_discarded(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.ping_ms = 0
+        self.game.online_player = 0
+        self.game.online_state = {'ball': [0, 3], 'velocity': [0, -40], '_received_at': 100,
+                                 'frame_id': 7, 'silent': False, 'paddles': [0, 0], 'shields': []}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.3):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.game.connection.send.assert_not_called()
+        self.game.online_state = {**self.game.online_state, '_received_at': 100.31, 'frame_id': 8}
+        with patch.object(run_offline.time, 'monotonic', return_value=100.31):
+            self.game.refresh_online_audio()
+            self.game.key_down(SimpleNamespace(keysym='Up'))
+        self.assertIsNotNone(self.game.audio.set_ball.call_args.args[0])
+        self.game.connection.send.assert_called_once_with('strike', view={'frame': 8, 'seconds': 0})
+
+    def test_recovery_replaces_stale_window_title_once(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.connection.supports_step_ack = False
+        self.game.connection.ping_ms = 120
+        self.game.connection.status_text.return_value = 'Ping 120 ms'
+        self.game.connection.events.get_nowait.side_effect = queue.Empty
+        self.game.controller.poll.return_value = []
+        self.game.online_state = {'ball': [0, 10], 'velocity': [0, -3], '_received_at': 100,
+                                 'scores': [0, 0], 'silent': False, 'paddles': [0, 0], 'shields': []}
+        self.game.online_game_screen()
+        with patch.object(self.game.root, 'after'):
+            with patch.object(run_offline.time, 'monotonic', return_value=100.3):
+                self.game.key_down(SimpleNamespace(keysym='F6'))
+                self.game.tick()
+            for now in (100.4, 100.7):
+                self.game.online_state['_received_at'] = now
+                with patch.object(run_offline.time, 'monotonic', return_value=now):
+                    self.game.tick()
+        self.assertIn('Bağlantı düzeldi', self.game.root.last_announcement)
+        self.assertNotIn('Oyun verisi gecikiyor', self.game.root.last_announcement)
+
+    def test_unstable_recovery_does_not_repeat_live_announcements(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.online_state = {'_received_at': 100}
+        with patch.object(self.game, 'announce') as announce:
+            for now, received in ((100.3, 100), (100.31, 100.31), (100.6, 100.31),
+                                  (100.61, 100.61), (100.9, 100.9), (101, 101)):
+                self.game.online_state['_received_at'] = received
+                with patch.object(run_offline.time, 'monotonic', return_value=now):
+                    self.game.update_network_notice()
+        self.assertEqual([call.args[0] for call in announce.call_args_list],
+                         ['Oyun verisi gecikiyor. Yeni girişler bekletiliyor.',
+                          'Bağlantı düzeldi. Oyun sürüyor.'])
+
+    def test_finished_match_does_not_announce_recovered_game(self):
+        self.game.connection = MagicMock()
+        self.game.connection.supports_strike_ref = True
+        self.game.online_state = {'_received_at': 100}
+        with patch.object(self.game, 'announce') as announce:
+            with patch.object(run_offline.time, 'monotonic', return_value=100.3):
+                self.game.update_network_notice()
+            self.game.online_state.update(_received_at=100.4, winner=1)
+            with patch.object(run_offline.time, 'monotonic', return_value=101):
+                self.game.update_network_notice()
+        self.assertEqual(announce.call_count, 1)
+
+    def test_explicit_status_uses_alert_without_replacing_window_title(self):
+        self.game.connection = MagicMock()
+        self.game.connection.status_text.return_value = 'Ping 42 ms'
+        title = self.game.root.title()
+        self.game.key_down(SimpleNamespace(keysym='F6'))
+        self.assertEqual(self.game.root.title(), title)
+        self.assertEqual(self.game.root.last_announcement, 'Ping 42 ms')
+
+    def test_rejected_contact_has_explanation(self):
+        self.start_offline()
+        self.game.online_message({'type': 'strike_result', 'result': 'out_of_reach', 'press': 1})
+        self.assertIn('raketin yanında', self.game.status.cget('text'))
 
     def test_network_state_is_applied_before_frame_is_drawn(self):
         self.game.connection = MagicMock()
@@ -174,6 +437,57 @@ class UITests(unittest.TestCase):
         self.assertIsNone(self.game.connection)
         self.assertEqual(self.game.paddle_prediction.position(0, player=0), 0)
 
+    def test_send_failure_on_strike_and_legacy_step_returns_to_menu(self):
+        for key in ('Up', 'Right'):
+            with self.subTest(key=key):
+                connection = MagicMock()
+                connection.supports_step_ack = False
+                connection.send.side_effect = ConnectionError('test offline')
+                self.game.connection = connection
+                self.game.online_player = 0
+                self.game.online_state = {'paddles': [0, 0]}
+                self.game.key_down(SimpleNamespace(keysym=key))
+                self.assertIsNone(self.game.connection)
+                self.assertIn('test offline', self.game.error.cget('text'))
+
+    def test_failed_room_send_keeps_error_menu_visible(self):
+        self.game.connection = MagicMock()
+        self.game.connection.send.side_effect = ConnectionError('queue full')
+        self.game.enter_room('create')
+        self.assertIsNone(self.game.connection)
+        self.assertIn('queue full', self.game.error.cget('text'))
+        self.assertTrue(self.game.name.winfo_exists())
+
+    def test_f6_reports_connection_status_even_before_match(self):
+        self.game.connection = MagicMock()
+        self.game.connection.status_text.return_value = 'Ping 42 ms | Dalgalanma 7 ms'
+        with patch.object(self.game, 'title_message') as announce:
+            self.game.key_down(SimpleNamespace(keysym='F6'))
+        announce.assert_called_once_with('Ping 42 ms | Dalgalanma 7 ms')
+
+    def test_stalled_state_blocks_commands_until_fresh_state_arrives(self):
+        self.game.connection = MagicMock()
+        self.game.connection.status_text.return_value = 'Ping 42 ms'
+        self.game.connection.supports_step_ack = False
+        self.game.online_player = 0
+        self.game.online_state = {'paddles': [0, 0], '_received_at': 100}
+        with patch.object(run_offline.time, 'monotonic', return_value=102):
+            for key in ('Up', 'Right', 'a', 'space'):
+                self.game.key_down(SimpleNamespace(keysym=key))
+            self.assertIn('Oyun verisi gecikiyor', self.game.network_text())
+        self.game.connection.send.assert_not_called()
+        self.game.online_state['_received_at'] = 102
+        with patch.object(run_offline.time, 'monotonic', return_value=102.1):
+            self.game.key_down(SimpleNamespace(keysym='Right'))
+        self.game.connection.send.assert_called_once_with('step', direction=1)
+
+    def test_stalled_ball_stops_extrapolating(self):
+        self.game.connection = MagicMock()
+        self.game.connection.ping_ms = 100
+        state = {'ball': [0, 10], 'velocity': [10, -10], '_received_at': 100}
+        with patch.object(run_offline.time, 'monotonic', return_value=102):
+            self.assertEqual(self.game.online_ball(state), (0, 10))
+
     def test_final_score_uses_authoritative_paddle_position(self):
         self.game.connection = MagicMock()
         self.game.connection.supports_step_ack = True
@@ -255,8 +569,8 @@ class UITests(unittest.TestCase):
         self.game.offline_character_menu()
         self.game.offline_settings()
         widgets = [widget for widget in self.game.container.winfo_children()
-                   if widget.winfo_class() == 'TCheckbutton']
+                   if widget.winfo_class() == 'CheckBox']
         self.assertEqual(len(widgets), 2)
-        self.assertIn('açık', self.game.root.getvar(widgets[0].cget('textvariable')))
+        self.assertTrue(widgets[0].native.GetValue())
         self.game.shield.set(False)
-        self.assertIn('kapalı', self.game.root.getvar(widgets[0].cget('textvariable')))
+        self.assertFalse(widgets[0].native.GetValue())
